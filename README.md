@@ -67,10 +67,10 @@ date: Дата транзакции в формате YYYY-MM-DD.
     Пример: date=2023-01-01
 
 page: Номер страницы для пагинации (начиная с 0).
-    Пример: page=1
+    Пример: page=1 (по умолчанию 0)
 
 size: Количество записей на странице.
-    Пример: size=20
+    Пример: size=20 (если не указан - по умолчанию грузится 20)
 Примеры запросов:
     Получение списка транзакций клиента с пагинацией:
     curl -X GET "http://localhost:8080/transactions?customerId=45022&page=1&size=20"
@@ -79,4 +79,4 @@ size: Количество записей на странице.
     Фильтрация транзакций по дате:
     curl -X GET "http://localhost:8080/transactions?date=2023-01-01"
     Комбинированный запрос с несколькими параметрами:
-    curl -X GET "http://localhost:8080/transactions?customerId=45022&accountId=5416195&date=2024-10-16&page=0&size=10"
+    curl -X GET "http://localhost:8080/transactions?customerId=45022&accountId=5416195&date=2024-10-16&page=0"
