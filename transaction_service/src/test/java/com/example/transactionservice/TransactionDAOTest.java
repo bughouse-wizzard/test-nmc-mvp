@@ -18,8 +18,6 @@ public class TransactionDAOTest {
         String url = "jdbc:postgresql://db:5432/transactions_test";
         String user = "postgres";
         String password = "postgres";
-
-        // Инициализация базы данных
         try (Connection conn = DriverManager.getConnection(url, user, password);
              Statement stmt = conn.createStatement()) {
             stmt.execute("CREATE TABLE IF NOT EXISTS transactions (" +
