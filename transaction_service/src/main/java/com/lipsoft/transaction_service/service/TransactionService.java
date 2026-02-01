@@ -2,6 +2,7 @@ package com.lipsoft.transaction_service.service;
 
 import com.lipsoft.transaction_service.model.TransactionEntity;
 import com.lipsoft.transaction_service.repository.TransactionRepository;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -62,7 +63,7 @@ public class TransactionService {
             return paginateList(allTransactions, page, size);
         } else if (accountId != null) {
             // Only accountId specified - use repository method with pagination
-            return transactionRepository.findByCustomerIdAndAccountId(customerId, accountId, pageable);
+            return transactionRepository.findByCustomerIdAndAccountId(customerId, accountId, pageable).getContent();
         } else if (date != null) {
             // Only date specified - need to manually paginate and sort
             List<TransactionEntity> allTransactions = transactionRepository.findByCustomerIdAndDate(customerId, date);
@@ -71,7 +72,7 @@ public class TransactionService {
             return paginateList(allTransactions, page, size);
         } else {
             // Only customerId specified - use repository method with pagination
-            return transactionRepository.findByCustomerId(customerId, pageable);
+            return transactionRepository.findByCustomerId(customerId, pageable).getContent();
         }
     }
     
