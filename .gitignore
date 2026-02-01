@@ -1,0 +1,17 @@
+target/
+*.class
+*.jar
+*.war
+*.ear
+*.zip
+*.tar.gz
+*.tar
+.DS_Store
+*.log
+node_modules/
+.env
+.vscode/
+.idea/
+out/
+build/
+dist/
