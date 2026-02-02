@@ -1,8 +1,10 @@
-# NMCK Search API
+# NMCK Search API / НМЦК Поиск Система
 
 FastAPI-based application for searching and analyzing government procurement contracts to calculate NMCK (Начальная максимальная цена контракта).
 
-## Features
+Система для автоматизированного поиска контрактов и расчёта начальной максимальной цены контракта (НМЦК).
+
+## Features / Особенности
 
 - **FastAPI** backend with async PostgreSQL support
 - **PostgreSQL** database for storing search requests and contract results
@@ -11,8 +13,11 @@ FastAPI-based application for searching and analyzing government procurement con
 - **Docker** and **docker-compose** for easy deployment
 - **DeepSeek AI** integration for contract analysis
 - **REST API** with OpenAPI documentation
+- **Web Interface** with HTML/CSS/JavaScript frontend
+- **Search functionality** with filtering and pagination
+- **Contract comparison** with modal dialogs
 
-## Project Structure
+## Project Structure / Структура проекта
 
 ```
 .
@@ -22,24 +27,32 @@ FastAPI-based application for searching and analyzing government procurement con
 │   ├── models/           # SQLAlchemy models
 │   ├── schemas/          # Pydantic schemas
 │   ├── services/         # Business logic
-│   └── workers/          # Celery workers and tasks
+│   ├── workers/          # Celery workers and tasks
+│   └── static/           # Frontend static files
+│       ├── index.html    # Main HTML page
+│       ├── css/
+│       │   └── styles.css # CSS styles
+│       └── js/
+│           └── app.js    # JavaScript logic
 ├── tests/                # Test files
 ├── alembic/              # Database migrations
 ├── docker-compose.yml    # Docker Compose configuration
 ├── Dockerfile           # Docker image definition
 ├── requirements.txt     # Python dependencies
 ├── .env                # Environment variables
+├── main.py             # FastAPI application
+├── test_app.py         # Structure tests
 └── README.md           # This file
 ```
 
-## Quick Start
+## Quick Start / Быстрый старт
 
-### Prerequisites
+### Prerequisites / Требования
 
 - Docker and Docker Compose
 - Python 3.12+ (for local development)
 
-### Using Docker Compose
+### Using Docker Compose / Использование Docker Compose
 
 1. Clone the repository:
    ```bash
@@ -59,11 +72,11 @@ FastAPI-based application for searching and analyzing government procurement con
    ```
 
 4. Access the application:
-   - API: http://localhost:8000
+   - Web Interface: http://localhost:8000
    - API Documentation: http://localhost:8000/docs
    - Health Check: http://localhost:8000/health
 
-### Local Development
+### Local Development / Локальная разработка
 
 1. Create and activate virtual environment:
    ```bash
@@ -104,8 +117,31 @@ FastAPI-based application for searching and analyzing government procurement con
 
 ### Health Check
 
-- `GET /` - Root endpoint
+- `GET /` - Root endpoint (web interface)
 - `GET /health` - Health check endpoint
+- `GET /api/info` - System information
+
+### Static Files
+
+- `GET /static/{path}` - Static files (CSS, JS, HTML)
+
+## Web Interface Features / Функциональность веб-интерфейса
+
+The interface includes:
+- Contract search by KTRU and parameters
+- Search history with pagination
+- Results table with filtering
+- Contract selection for NMCK calculation
+- Modal dialogs for specification comparison
+- Action notifications
+
+Интерфейс включает:
+- Поиск контрактов по КТРУ и параметрам
+- История поисков с пагинацией
+- Таблица результатов с фильтрацией
+- Выбор контрактов для расчёта НМЦК
+- Модальные окна для сравнения характеристик
+- Уведомления о действиях
 
 ## Database Schema
 
@@ -152,8 +188,9 @@ FastAPI-based application for searching and analyzing government procurement con
 | `REDIS_DB` | Redis database | `0` |
 | `DEEPSEEK_API_KEY` | DeepSeek API key | (required) |
 | `DEBUG` | Debug mode | `false` |
+| `LOG_LEVEL` | Logging level | `INFO` |
 
-## Development
+## Development / Разработка
 
 ### Running Tests
 
@@ -184,7 +221,7 @@ alembic revision --autogenerate -m "Description"
 alembic upgrade head
 ```
 
-## Deployment
+## Deployment / Развёртывание
 
 ### Production Considerations
 
@@ -201,6 +238,17 @@ alembic upgrade head
 - Use PostgreSQL connection pooling
 - Configure Redis clustering for high availability
 - Implement load balancing
+
+## Technologies / Технологии
+
+- **Backend**: FastAPI (Python)
+- **Frontend**: HTML, CSS, JavaScript
+- **Styling**: Tailwind CSS, Font Awesome
+- **Server**: Uvicorn (ASGI server)
+- **Database**: PostgreSQL with SQLAlchemy
+- **Cache/Task Queue**: Redis with Celery
+- **AI Integration**: DeepSeek API
+- **Containerization**: Docker, Docker Compose
 
 ## License
 
