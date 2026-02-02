@@ -1,82 +1,211 @@
-# Сервис для просмотре истории транзакций
+# NMCK Search API
 
-## Описание
+FastAPI-based application for searching and analyzing government procurement contracts to calculate NMCK (Начальная максимальная цена контракта).
 
-Этот микросервис предоставляет API для просмотра истории транзакций. Пользователи могут фильтровать транзакции по дате, конкретному счету и другим параметрам. Также реализована поддержка пагинации для работы с большими объемами данных.
+## Features
 
-## Функциональность
+- **FastAPI** backend with async PostgreSQL support
+- **PostgreSQL** database for storing search requests and contract results
+- **Redis** for caching and Celery task queue
+- **Celery** workers for background processing
+- **Docker** and **docker-compose** for easy deployment
+- **DeepSeek AI** integration for contract analysis
+- **REST API** with OpenAPI documentation
 
-- Просмотр всех транзакций пользователя.
-- Фильтрация транзакций:
-  - По дате совершения операции.
-  - По конкретному счету.
-- Пагинация для работы с большими объемами данных.
-- Поддержка двух источников данных:
-  - Входящие транзакции ([incomes.csv](init-db/incomes.csv)).
-  - Исходящие платежи ([outcomes.csv](init-db/outcomes.csv)).
+## Project Structure
 
-## Немного о том как все это работает и почему код такой
+```
+.
+├── app/
+│   ├── api/              # API endpoints
+│   ├── core/             # Core configuration and database
+│   ├── models/           # SQLAlchemy models
+│   ├── schemas/          # Pydantic schemas
+│   ├── services/         # Business logic
+│   └── workers/          # Celery workers and tasks
+├── tests/                # Test files
+├── alembic/              # Database migrations
+├── docker-compose.yml    # Docker Compose configuration
+├── Dockerfile           # Docker image definition
+├── requirements.txt     # Python dependencies
+├── .env                # Environment variables
+└── README.md           # This file
+```
 
-Ограничения на использование источников сильно усложнает, казалось бы трививальную задчу.
-то что мы не можем считать файлы целиком и в целом не очень хотим часто их открывать порождает два возможных решения:
-1) Считывать данные с файлов параллельно и построчно в ходе работы сервиса. НО - это не будет работать если данные в исходных файлах не сортированы(А они не сортированы), а сортировка съест еще больше ресурсов.
-2) Осуществить предварительную подготовку информации:
-Зписать данные в базу данных. Это потребует времени при старте работы сервиса, но очень ускорит тоступ к информации, при этом избавив нас от необходимости придумывать как вытащить данные быстро и точно из файла который целиком в оперативку не влезает.
-Очевидно, что в условии задачи с несортированными данными второй способ предпочительнее.
+## Quick Start
 
-в общем рабта сервиса выглядит так:
-- инициализировали базу данных
-- запустили HTTP сервер из Main
-- когда приходит запрос обработчик извлекает параметры запроса, передвает их в DAO, выполняется запрос к базе данных
-- формируется ответ в JSON
+### Prerequisites
 
-## Технологии
+- Docker and Docker Compose
+- Python 3.12+ (for local development)
 
-- **Java 17**: Основной язык разработки.
-- **HTTPServer**: Для обработки запросов
-- **PostgreSQL**: База данных для хранения транзакций.
-- **Maven**: Система сборки проекта.
-- **Docker**: Контейнеризация приложения.
+### Using Docker Compose
 
-## Установка и запуск
-### 1. Клонирование репозитория
+1. Clone the repository:
+   ```bash
+   git clone <repository-url>
+   cd nmck-search
+   ```
 
-### 2. Запуск сервиса
-    docker-compose up
+2. Configure environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env file with your settings
+   ```
 
-### 3. Запуск тестов
-    чтобы тесты завелись все надо чтобы был запущен контейнер с базой данных.
-    если запускаем только тесты:
-    docker-compose up db
-    или просто запустить сервис как в 2.
-    дальше запускаем тесты
-    docker-compose up tests
+3. Start the services:
+   ```bash
+   docker-compose up -d
+   ```
 
-API
-Основные эндпоинты:
-    GET /transactions - получение списка транзакций, поддерживает фильтры и пагинацию
-    GET /transactions/{id} - получение информации о конерктной транзакции
-Параметры для эндпоинта GET /transactions
-    customerId: ID клиента, для которого нужно получить транзакции.
-    Пример: customerId=45022
+4. Access the application:
+   - API: http://localhost:8000
+   - API Documentation: http://localhost:8000/docs
+   - Health Check: http://localhost:8000/health
 
-accountId: ID счета, для которого нужно получить транзакции.
-    Пример: accountId=9895153
+### Local Development
 
-date: Дата транзакции в формате YYYY-MM-DD.
-    Пример: date=2023-01-01
+1. Create and activate virtual environment:
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
 
-page: Номер страницы для пагинации (начиная с 0).
-    Пример: page=1 (по умолчанию 0)
+2. Install dependencies:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-size: Количество записей на странице.
-    Пример: size=20 (если не указан - по умолчанию грузится 20)
-Примеры запросов:
-    Получение списка транзакций клиента с пагинацией:
-    curl -X GET "http://localhost:8080/transactions?customerId=45022&page=1&size=20"
-    Фильтрация транзакций по счету:
-    curl -X GET "http://localhost:8080/transactions?accountId=9895153"
-    Фильтрация транзакций по дате:
-    curl -X GET "http://localhost:8080/transactions?date=2023-01-01"
-    Комбинированный запрос с несколькими параметрами:
-    curl -X GET "http://localhost:8080/transactions?customerId=45022&accountId=5416195&date=2024-10-16&page=0"
+3. Set up environment variables:
+   ```bash
+   cp .env.example .env
+   # Edit .env file
+   ```
+
+4. Run the application:
+   ```bash
+   uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+   ```
+
+## API Endpoints
+
+### Search Management
+
+- `POST /api/v1/search` - Create a new search
+- `GET /api/v1/search` - List all searches
+- `GET /api/v1/search/{id}` - Get search by ID
+- `POST /api/v1/search/{id}/stop` - Stop a running search
+- `GET /api/v1/search/{id}/results` - Get search results
+
+### Contract Management
+
+- `GET /api/v1/contracts/{id}` - Get contract by ID
+- `GET /api/v1/contracts/{id}/comparison` - Get contract specification comparison
+
+### Health Check
+
+- `GET /` - Root endpoint
+- `GET /health` - Health check endpoint
+
+## Database Schema
+
+### Search Request
+- `id` - UUID primary key
+- `status` - Search status (RUNNING, DONE, STOPPED, ERROR)
+- `object_name` - Object name
+- `ktru_code` - KTRU code
+- `customer_region` - Customer region
+- `found_total` - Total contracts found
+- `processed_count` - Number of processed contracts
+- `nmc_value` - Calculated NMCK value
+
+### Contract Result
+- `id` - UUID primary key
+- `search_id` - Foreign key to search request
+- `reestr_number` - Registry number
+- `contract_url` - Contract URL
+- `match_type` - Match type (IDENTICAL, HOMOGENEOUS, NO_MATCH)
+- `ai_score` - AI score (0-100)
+- `unit_price` - Unit price
+
+### Specification Comparison
+- `id` - UUID primary key
+- `contract_result_id` - Foreign key to contract result
+- `name` - Specification name
+- `target_value` - Target value
+- `actual_value` - Actual value
+- `match_status` - Match status (MATCH, DIFF, UNKNOWN)
+
+## Configuration
+
+### Environment Variables
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `POSTGRES_USER` | PostgreSQL username | `postgres` |
+| `POSTGRES_PASSWORD` | PostgreSQL password | `postgres` |
+| `POSTGRES_DB` | PostgreSQL database name | `nmck_db` |
+| `POSTGRES_SERVER` | PostgreSQL server host | `db` |
+| `POSTGRES_PORT` | PostgreSQL port | `5432` |
+| `REDIS_HOST` | Redis host | `redis` |
+| `REDIS_PORT` | Redis port | `6379` |
+| `REDIS_DB` | Redis database | `0` |
+| `DEEPSEEK_API_KEY` | DeepSeek API key | (required) |
+| `DEBUG` | Debug mode | `false` |
+
+## Development
+
+### Running Tests
+
+```bash
+pytest tests/
+```
+
+### Code Formatting
+
+```bash
+black app/
+isort app/
+```
+
+### Type Checking
+
+```bash
+mypy app/
+```
+
+### Database Migrations
+
+```bash
+# Generate new migration
+alembic revision --autogenerate -m "Description"
+
+# Apply migrations
+alembic upgrade head
+```
+
+## Deployment
+
+### Production Considerations
+
+1. Update `.env` file with production values
+2. Set `DEBUG=false`
+3. Use proper SSL/TLS certificates
+4. Configure firewall rules
+5. Set up monitoring and logging
+6. Configure backup strategy
+
+### Scaling
+
+- Increase `docker-compose` replicas for app and worker services
+- Use PostgreSQL connection pooling
+- Configure Redis clustering for high availability
+- Implement load balancing
+
+## License
+
+[Add your license here]
+
+## Support
+
+For issues and feature requests, please use the issue tracker.
