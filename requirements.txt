@@ -1,6 +1,7 @@
 # FastAPI and ASGI server
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
+pydantic>=2.0.0
 
 # Database
 sqlalchemy==2.0.36
@@ -36,7 +37,6 @@ rapidfuzz==3.9.5
 # Testing
 pytest==8.3.4
 pytest-asyncio==0.24.0
-httpx==0.28.1
 
 # Development
 black==24.10.0
