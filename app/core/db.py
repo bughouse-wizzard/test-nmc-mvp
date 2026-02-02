@@ -1,14 +1,16 @@
 from typing import AsyncGenerator
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
-from sqlalchemy.orm import DeclarativeBase
+
 from sqlalchemy import MetaData
+from sqlalchemy.ext.asyncio import (AsyncSession, async_sessionmaker,
+                                    create_async_engine)
+from sqlalchemy.orm import DeclarativeBase
 
 from app.core.config import settings
 
 
 class Base(DeclarativeBase):
     """Base class for all SQLAlchemy models."""
-    
+
     metadata = MetaData(
         naming_convention={
             "ix": "ix_%(column_0_label)s",
@@ -53,5 +55,5 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         # Create all tables
         await conn.run_sync(Base.metadata.create_all)
-    
+
     print("Database initialized successfully")

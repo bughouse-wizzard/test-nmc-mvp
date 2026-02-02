@@ -1,13 +1,14 @@
+import os
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import JSONResponse, FileResponse
-from contextlib import asynccontextmanager
-import os
 
+from app.api.routers import api_router
 from app.core.config import settings
 from app.core.db import init_db
-from app.api.routers import api_router
 
 
 @asynccontextmanager
@@ -76,7 +77,7 @@ async def get_searches():
                 "ktru": "17.12.14.110",
                 "status": "Завершен",
                 "found": 45,
-                "avg": 420.50
+                "avg": 420.50,
             },
             {
                 "id": 102,
@@ -85,12 +86,13 @@ async def get_searches():
                 "ktru": "26.20.15.000",
                 "status": "Завершен",
                 "found": 15,
-                "avg": 54400.00
-            }
+                "avg": 54400.00,
+            },
         ]
     }
 
 
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run(app, host="0.0.0.0", port=8000)

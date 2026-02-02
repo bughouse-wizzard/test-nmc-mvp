@@ -1,14 +1,16 @@
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
+
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 router = APIRouter()
 
 
 class ContractResult(BaseModel):
     """Contract result model."""
+
     id: UUID
     search_id: UUID
     reestr_number: str
@@ -28,6 +30,7 @@ class ContractResult(BaseModel):
 
 class SpecComparisonRow(BaseModel):
     """Specification comparison row model."""
+
     name: str
     target_value: str
     actual_value: str

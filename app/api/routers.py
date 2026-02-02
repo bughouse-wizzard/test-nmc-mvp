@@ -1,6 +1,6 @@
 from fastapi import APIRouter
 
-from app.api.endpoints import search, contracts, health
+from app.api.endpoints import contracts, health, search
 
 api_router = APIRouter()
 

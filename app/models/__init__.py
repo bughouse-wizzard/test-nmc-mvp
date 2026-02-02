@@ -1,8 +1,8 @@
 # Models package initialization
 from .base import Base, BaseModel
-from .search_request import SearchRequest, SearchStatus, InputSource
 from .contract_result import ContractResult, MatchType
-from .spec_comparison_row import SpecComparisonRow, MatchStatus
+from .search_request import InputSource, SearchRequest, SearchStatus
+from .spec_comparison_row import MatchStatus, SpecComparisonRow
 
 __all__ = [
     "Base",

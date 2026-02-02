@@ -1,14 +1,16 @@
+from datetime import datetime
 from typing import List, Optional
 from uuid import UUID
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+
+from fastapi import APIRouter, BackgroundTasks, HTTPException
 from pydantic import BaseModel, Field
-from datetime import datetime
 
 router = APIRouter()
 
 
 class SearchRequest(BaseModel):
     """Search request model."""
+
     object_name: str = Field(..., description="Наименование объекта закупки")
     ktru_code: str = Field(..., description="Код КТРУ")
     okpd2_code: Optional[str] = Field(None, description="Код ОКПД2")
@@ -16,13 +18,17 @@ class SearchRequest(BaseModel):
     law: str = Field("44", description="Закон (44-ФЗ)")
     date_from: datetime = Field(..., description="Дата начала периода")
     date_to: datetime = Field(..., description="Дата окончания периода")
-    execution_statuses: List[str] = Field(["Исполнение завершено", "Исполнение прекращено"], description="Статусы исполнения")
+    execution_statuses: List[str] = Field(
+        ["Исполнение завершено", "Исполнение прекращено"],
+        description="Статусы исполнения",
+    )
     limit_contracts: int = Field(30, description="Лимит обработки контрактов")
     input_source: str = Field("MANUAL", description="Источник ввода (MANUAL|FILE)")
 
 
 class SearchResponse(BaseModel):
     """Search response model."""
+
     id: UUID
     status: str
     created_at: datetime
@@ -39,6 +45,7 @@ async def create_search(request: SearchRequest, background_tasks: BackgroundTask
     # TODO: Implement actual search creation
     # For now, return a mock response
     from uuid import uuid4
+
     return SearchResponse(
         id=uuid4(),
         status="RUNNING",
