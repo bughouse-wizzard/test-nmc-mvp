@@ -1,6 +1,6 @@
-# NMCK Search API
+# NMCK Search API - Full Stack Application
 
-FastAPI-based application for searching and analyzing government procurement contracts to calculate NMCK (Начальная максимальная цена контракта).
+FastAPI-based application for searching and analyzing government procurement contracts to calculate NMCK (Начальная максимальная цена контракта). This is a full-stack application with a comprehensive backend and integrated frontend.
 
 ## Features
 
@@ -11,6 +11,7 @@ FastAPI-based application for searching and analyzing government procurement con
 - **Docker** and **docker-compose** for easy deployment
 - **DeepSeek AI** integration for contract analysis
 - **REST API** with OpenAPI documentation
+- **Integrated Frontend** with HTML, CSS, and JavaScript
 
 ## Project Structure
 
@@ -22,6 +23,10 @@ FastAPI-based application for searching and analyzing government procurement con
 │   ├── models/           # SQLAlchemy models
 │   ├── schemas/          # Pydantic schemas
 │   ├── services/         # Business logic
+│   ├── static/           # Frontend static files
+│   │   ├── index.html    # Main HTML page
+│   │   ├── css/          # CSS styles
+│   │   └── js/           # JavaScript logic
 │   └── workers/          # Celery workers and tasks
 ├── tests/                # Test files
 ├── alembic/              # Database migrations
@@ -59,7 +64,7 @@ FastAPI-based application for searching and analyzing government procurement con
    ```
 
 4. Access the application:
-   - API: http://localhost:8000
+   - Web Interface: http://localhost:8000/
    - API Documentation: http://localhost:8000/docs
    - Health Check: http://localhost:8000/health
 
@@ -104,8 +109,9 @@ FastAPI-based application for searching and analyzing government procurement con
 
 ### Health Check
 
-- `GET /` - Root endpoint
+- `GET /` - Root endpoint (serves frontend)
 - `GET /health` - Health check endpoint
+- `GET /api/search` - Mock search history data
 
 ## Database Schema
 

@@ -52,6 +52,7 @@ docker-compose.override.yml
 # Logs
 *.log
 logs/
+server.log
 
 # Database
 *.db
