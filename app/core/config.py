@@ -1,7 +1,7 @@
+"""Application configuration."""
 import os
 from typing import List, Optional
 from pydantic_settings import BaseSettings
-
 
 class Settings(BaseSettings):
     """Application settings."""
@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    # CORS - combine both origins
+    BACKEND_CORS_ORIGINS: List[str] = ["*", "http://localhost:3000", "http://localhost:8000"]
     
-    # Database
+    # Database - keep PostgreSQL configuration
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "db")
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "postgres")
@@ -38,6 +38,9 @@ class Settings(BaseSettings):
     # Application
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     
+    # Logging from incoming branch
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    
     @property
     def DATABASE_URL(self) -> str:
         """Construct database URL from components."""
@@ -51,6 +54,5 @@ class Settings(BaseSettings):
     class Config:
         env_file = ".env"
         case_sensitive = True
-
 
 settings = Settings()

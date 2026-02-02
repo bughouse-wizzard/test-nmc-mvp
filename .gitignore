@@ -21,7 +21,7 @@ wheels/
 *.egg
 MANIFEST
 
-# Virtual Environment
+# Virtual environments
 .env
 .venv
 env/
@@ -35,6 +35,7 @@ venv.bak/
 .idea/
 *.swp
 *.swo
+*~
 
 # OS
 .DS_Store
@@ -68,12 +69,6 @@ htmlcov/
 # Jupyter Notebook
 .ipynb_checkpoints
 
-# PyCharm
-.idea/
-
-# VS Code
-.vscode/
-
 # Temporary files
 *.tmp
 *.temp
@@ -98,3 +93,4 @@ celerybeat.pid
 
 # Alembic
 alembic.ini
+alembic/versions/
