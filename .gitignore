@@ -92,5 +92,5 @@ celerybeat-schedule
 celerybeat.pid
 
 # Alembic
-alembic.ini
+# alembic.ini - This should be tracked as it contains configuration
 alembic/versions/
