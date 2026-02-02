@@ -1,7 +1,7 @@
+"""Application configuration."""
 import os
 from typing import List, Optional
 from pydantic_settings import BaseSettings
-
 
 class Settings(BaseSettings):
     """Application settings."""
@@ -11,10 +11,10 @@ class Settings(BaseSettings):
     VERSION: str = "1.0.0"
     API_V1_STR: str = "/api/v1"
     
-    # CORS
-    BACKEND_CORS_ORIGINS: List[str] = ["*"]
+    # CORS - combine both origins
+    BACKEND_CORS_ORIGINS: List[str] = ["*", "http://localhost:3000", "http://localhost:8000"]
     
-    # Database
+    # Database - support both PostgreSQL and SQLite
     POSTGRES_SERVER: str = os.getenv("POSTGRES_SERVER", "db")
     POSTGRES_USER: str = os.getenv("POSTGRES_USER", "postgres")
     POSTGRES_PASSWORD: str = os.getenv("POSTGRES_PASSWORD", "postgres")
@@ -38,19 +38,28 @@ class Settings(BaseSettings):
     # Application
     DEBUG: bool = os.getenv("DEBUG", "False").lower() == "true"
     
+    # Logging (from incoming branch)
+    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+    
     @property
     def DATABASE_URL(self) -> str:
         """Construct database URL from components."""
-        return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        # Use PostgreSQL if available, otherwise fall back to SQLite
+        if all([self.POSTGRES_SERVER, self.POSTGRES_USER, self.POSTGRES_PASSWORD, self.POSTGRES_DB]):
+            return f"postgresql+asyncpg://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        else:
+            return "sqlite:///./nmck.db"
     
     @property
     def SYNC_DATABASE_URL(self) -> str:
         """Construct synchronous database URL for Alembic."""
-        return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        if all([self.POSTGRES_SERVER, self.POSTGRES_USER, self.POSTGRES_PASSWORD, self.POSTGRES_DB]):
+            return f"postgresql://{self.POSTGRES_USER}:{self.POSTGRES_PASSWORD}@{self.POSTGRES_SERVER}:{self.POSTGRES_PORT}/{self.POSTGRES_DB}"
+        else:
+            return "sqlite:///./nmck.db"
     
     class Config:
         env_file = ".env"
         case_sensitive = True
-
 
 settings = Settings()
