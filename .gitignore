@@ -94,3 +94,9 @@ celerybeat.pid
 # Alembic
 # alembic.ini - This should be tracked as it contains configuration
 alembic/versions/
+
+# Temporary workspace directories
+workspace_*/
+openhands/
+setup_*.sh
+TASKS.md
