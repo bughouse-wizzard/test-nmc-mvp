@@ -34,7 +34,7 @@
 - [x] Create proper file structure at app/services/scraper/search.py
 - [x] Add documentation and type hints
 - [x] Commit changes
-- [ ] Push to remote branch
+- [x] Push to remote branch
 
 ## Notes
 - Target: zakupki.gov.ru search functionality
