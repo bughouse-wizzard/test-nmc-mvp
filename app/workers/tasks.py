@@ -44,21 +44,41 @@ async def _search_contracts_async(search_id: UUID) -> Dict[str, Any]:
         await session.commit()
         
         try:
-            # TODO: Implement actual contract search logic
-            # This is a placeholder for the actual implementation
+            # Import the scraper
+            from app.services.scraper.search import search_contracts
             
-            # Simulate searching
-            await asyncio.sleep(2)
+            # Convert dates from string to datetime
+            from datetime import datetime
+            date_from = datetime.strptime(search_request.date_from, "%Y-%m-%d")
+            date_to = datetime.strptime(search_request.date_to, "%Y-%m-%d")
+            
+            # Get execution statuses
+            execution_statuses = search_request.get_execution_statuses()
+            
+            # Search for contracts using the scraper
+            search_result = await search_contracts(
+                ktru_code=search_request.ktru_code,
+                date_from=date_from,
+                date_to=date_to,
+                law=search_request.law,
+                customer_region=search_request.customer_region,
+                execution_statuses=execution_statuses,
+                max_pages=3  # Limit to 3 pages for MVP
+            )
             
             # Update search request with results
-            search_request.found_total = 10  # Example value
+            search_request.found_total = search_result["found_total"]
             search_request.processed_count = 0
             search_request.status = "DONE"
             await session.commit()
             
+            # TODO: Store contract results in database
+            # For now, just return the search results
+            
             return {
                 "search_id": str(search_id),
-                "found_total": 10,
+                "found_total": search_result["found_total"],
+                "contracts_found": len(search_result["contracts"]),
                 "status": "completed",
             }
             
