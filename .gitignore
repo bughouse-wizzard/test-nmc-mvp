@@ -94,3 +94,15 @@ celerybeat.pid
 # Alembic
 alembic.ini
 alembic/versions/
+
+# Workspace directories
+workspace_ai-feat-task_*/
+openhands/
+
+# Temporary files
+setup_fix.sh
+setup_task.sh
+nmck.db
+
+# MyPy cache
+.mypy_cache/
