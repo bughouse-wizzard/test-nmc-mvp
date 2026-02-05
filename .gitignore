@@ -16,6 +16,7 @@ parts/
 sdist/
 var/
 wheels/
+share/python-wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -29,6 +30,11 @@ venv/
 ENV/
 env.bak/
 venv.bak/
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
 
 # IDE
 .vscode/
@@ -49,11 +55,6 @@ Thumbs.db
 # Logs
 *.log
 logs/
-
-# Database
-*.db
-*.sqlite
-*.sqlite3
 
 # Docker
 docker-compose.override.yml
@@ -112,3 +113,6 @@ dump.rdb
 
 # PostgreSQL
 pgdata/
+
+# Test files
+test_models.py

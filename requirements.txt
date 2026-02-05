@@ -69,3 +69,6 @@ fastapi-cors==0.1.0
 
 # File upload handling
 python-multipart==0.0.6
+
+# UUID generation
+uuid>=1.30
