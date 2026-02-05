@@ -181,16 +181,13 @@ async def stream_search_events(search_id: UUID):
         try:
             # Subscribe to events for this search
             async for event_data in event_channel.subscribe(search_id):
-                # Parse the event data
-                event_dict = json.loads(event_data)
-                
-                # Convert to SSE format
-                # Note: In a real implementation, we would reconstruct the event object
-                # from the JSON and use event_to_sse_format. For simplicity, we'll
-                # send the raw JSON with appropriate SSE formatting.
-                
-                # Determine event type from the data
-                event_type = event_dict.get("type", "message")
+                # Parse the event data to extract event type
+                try:
+                    event_dict = json.loads(event_data)
+                    event_type = event_dict.get("type", "message")
+                except json.JSONDecodeError:
+                    # If we can't parse JSON, use default type
+                    event_type = "message"
                 
                 # Format as SSE
                 yield f"event: {event_type}\n"

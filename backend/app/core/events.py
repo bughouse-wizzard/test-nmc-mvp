@@ -73,8 +73,8 @@ def event_to_sse_format(event: Event) -> str:
     Returns:
         Formatted SSE string
     """
-    event_dict = event.model_dump()
-    event_type = event_dict.pop("type")
+    # Get event type from the event object
+    event_type = event.type.value if hasattr(event.type, 'value') else str(event.type)
     
     # Format as SSE
     lines = [
