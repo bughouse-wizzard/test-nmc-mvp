@@ -373,22 +373,23 @@ async def stream_search_events(search_id: UUID):
         try:
             # Subscribe to events for this search
             async for event_data in event_channel.subscribe(search_id):
-                # Parse the event data
-                event_dict = json.loads(event_data)
+                # The event_data should already be a JSON string from event_channel
+                # Parse it to extract event type for SSE formatting
+                try:
+                    event_dict = json.loads(event_data)
+                    event_type = event_dict.get("type", "message")
+                    
+                    # Format as SSE
+                    yield f"event: {event_type}\n"
+                    yield f"data: {event_data}\n\n"
+                    
+                except json.JSONDecodeError:
+                    # If event_data is not valid JSON, send it as a message event
+                    yield f"event: message\n"
+                    yield f"data: {json.dumps({'message': event_data})}\n\n"
                 
-                # Convert to SSE format
-                # Note: In a real implementation, we would reconstruct the event object
-                # from the JSON and use event_to_sse_format. For simplicity, we'll
-                # send the raw JSON with appropriate SSE formatting.
-                
-                # Determine event type from the data
-                event_type = event_dict.get("type", "message")
-                
-                # Format as SSE
-                yield f"event: {event_type}\n"
-                yield f"data: {event_data}\n\n"
-                
-                # Keep connection alive
+                # Keep connection alive with periodic ping
+                # This helps prevent connection timeouts
                 await asyncio.sleep(0.1)
                 
         except asyncio.CancelledError:
@@ -413,5 +414,6 @@ async def stream_search_events(search_id: UUID):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable buffering for nginx
+            "Access-Control-Allow-Origin": "*",  # Allow CORS for SSE
         }
     )
