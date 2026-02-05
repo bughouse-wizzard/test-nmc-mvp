@@ -17,6 +17,7 @@ from ...core.events import event_to_sse_format
 from ...worker.tasks import process_search
 from ...db import get_db
 from ...models import SearchRequest, ContractResult, SearchStatus, InputSource, MatchType
+from ....services.report import ReportGenerator
 
 router = APIRouter()
 
@@ -453,6 +454,60 @@ async def stream_search_events(search_id: UUID):
             "Access-Control-Allow-Origin": "*",  # Allow CORS for SSE
         }
     )
+
+
+@router.get("/{search_id}/report")
+async def get_search_report(
+    search_id: UUID,
+    db: Session = Depends(get_db)
+):
+    """
+    Generate and download XLSX report for a search.
+    
+    The report contains three sheets:
+    1. Summary Sheet: Search parameters and NMCK calculation results
+    2. Detailed Sheet: List of all analyzed contracts with match status, price, and manufacturer
+    3. Comparison Sheet: Detailed specification comparison for selected contracts
+    """
+    # Check if search exists
+    search_request = db.query(SearchRequest).filter(SearchRequest.id == str(search_id)).first()
+    if not search_request:
+        raise HTTPException(status_code=404, detail="Search not found")
+    
+    # Check if search is completed
+    if search_request.status != SearchStatus.DONE:
+        raise HTTPException(
+            status_code=400, 
+            detail=f"Cannot generate report for search with status: {search_request.status}. "
+                   f"Search must be completed (DONE) to generate report."
+        )
+    
+    try:
+        # Generate report
+        report_generator = ReportGenerator(db)
+        report_bytes = report_generator.generate_search_report(str(search_id))
+        
+        # Create filename with search ID and timestamp
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"report_search_{search_id}_{timestamp}.xlsx"
+        
+        # Return as streaming response
+        return StreamingResponse(
+            report_bytes,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": f"attachment; filename={filename}",
+                "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            }
+        )
+    
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Failed to generate report: {str(e)}"
+        )
 
 
 @router.get("/history", response_model=SearchHistoryResponse)
