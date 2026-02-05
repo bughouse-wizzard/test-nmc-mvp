@@ -393,12 +393,55 @@
         let sseConnections = {}; // Store SSE connections by search ID
 
         document.addEventListener('DOMContentLoaded', () => {
-            initMockHistory(); // Generate dummy data to show pagination
-            renderHistory();
+            loadHistory(); // Load real history from API
             document.getElementById('results-footer').classList.add('translate-y-full'); 
         });
 
-        // Generate some history data so pagination is visible
+        // Load history from API
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/search/history');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Convert API response to MOCK_HISTORY format for compatibility
+                MOCK_HISTORY = data.searches.map(search => ({
+                    id: search.id,
+                    date: new Date(search.created_at).toISOString().split('T')[0],
+                    name: search.object_name,
+                    ktru: search.ktru_code,
+                    status: mapSearchStatus(search.status),
+                    found: search.found_total || 0,
+                    avg: search.nmc_value || 0,
+                    type: detectType(search.object_name),
+                    targetMfr: search.manufacturer || null,
+                    searchData: search // Store full search data for reference
+                }));
+                
+                renderHistory();
+            } catch (error) {
+                console.error('Error loading history:', error);
+                // Fallback to mock data if API fails
+                initMockHistory();
+                renderHistory();
+                showToast('Не удалось загрузить историю поисков', 'error');
+            }
+        }
+
+        // Map backend status to frontend status
+        function mapSearchStatus(backendStatus) {
+            const statusMap = {
+                'RUNNING': 'В работе',
+                'COMPLETED': 'Завершен',
+                'STOPPED': 'Остановлен',
+                'ERROR': 'Ошибка'
+            };
+            return statusMap[backendStatus] || backendStatus;
+        }
+
+        // Generate some history data so pagination is visible (fallback)
         function initMockHistory() {
             MOCK_HISTORY = [
                 { id: 101, date: "2026-01-21", name: "Бумага офисная A4", ktru: "17.12.14.110", status: "Завершен", found: 45, avg: 420.50, type: "paper" },
@@ -485,6 +528,7 @@
                     date_to: today.toISOString(),
                     execution_statuses: ["Исполнение завершено"],
                     limit_contracts: limitVal,
+                    input_source: "MANUAL",
                     characteristics_text: specsText,
                     manufacturer: document.getElementById('mfr-input').value || null
                 };
@@ -676,27 +720,40 @@
             if(activeSidebarSearchId) stopSearch(activeSidebarSearchId);
         }
 
-        function stopSearch(id) {
-            // Clear any mock intervals
-            if(searchIntervals[id]) {
-                clearInterval(searchIntervals[id]);
-                delete searchIntervals[id];
-            }
+        async function stopSearch(id) {
+            try {
+                // Call API to stop search
+                const response = await fetch(`/api/search/${id}/stop`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
 
-            // Close SSE connection
-            if(sseConnections[id]) {
-                sseConnections[id].close();
-                delete sseConnections[id];
-            }
-
-            const item = MOCK_HISTORY.find(i => i.id === id);
-            if(item && item.status === "В работе") {
-                item.status = "Остановлен";
-                showToast('Поиск остановлен пользователем', 'error');
-                if(activeSidebarSearchId === id) {
-                    resetSidebarUI();
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                renderHistory();
+
+                const result = await response.json();
+                
+                // Close SSE connection
+                if(sseConnections[id]) {
+                    sseConnections[id].close();
+                    delete sseConnections[id];
+                }
+
+                const item = MOCK_HISTORY.find(i => i.id === id);
+                if(item && item.status === "В работе") {
+                    item.status = "Остановлен";
+                    showToast('Поиск остановлен пользователем', 'error');
+                    if(activeSidebarSearchId === id) {
+                        resetSidebarUI();
+                    }
+                    renderHistory();
+                }
+            } catch (error) {
+                console.error('Error stopping search:', error);
+                showToast('Ошибка при остановке поиска', 'error');
             }
         }
 
@@ -779,8 +836,8 @@
             renderHistory();
         }
 
-        function refreshHistory() {
-            renderHistory();
+        async function refreshHistory() {
+            await loadHistory();
             showToast('История обновлена', 'info');
         }
 
@@ -854,8 +911,68 @@
         }
 
         // --- RESULTS LOGIC ---
-        function loadResults(historyItem) {
-            const count = historyItem.found;
+        async function loadResults(historyItem) {
+            try {
+                // Fetch results from backend
+                const response = await fetch(`/api/search/${historyItem.id}/results`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Convert API response to currentContracts format
+                currentContracts = data.results.map(result => {
+                    const signDate = new Date(result.sign_date);
+                    const year = signDate.getFullYear();
+                    const score = result.ai_score || Math.floor(60 + Math.random()*40);
+                    
+                    return {
+                        id: result.id,
+                        date: result.sign_date.split('T')[0],
+                        price: result.unit_price || 0,
+                        type: result.match_type === 'EXACT' ? "Идентичный" : "Однородный",
+                        manufacturer: result.manufacturer_found || "Не указан",
+                        score: score,
+                        is2025: year >= 2025,
+                        targetMfr: historyItem.targetMfr,
+                        specs: [], // Will be populated from raw_data_json if available
+                        rawData: result.raw_data_json,
+                        contract_url: result.contract_url,
+                        reestr_number: result.reestr_number,
+                        currency: result.currency,
+                        manufacturer_match: result.manufacturer_match,
+                        accepted_for_nmc: result.accepted_for_nmc
+                    };
+                });
+                
+                selectedContractIds.clear();
+                // Auto-select top 3 results by score
+                currentContracts.sort((a,b) => b.score - a.score);
+                currentContracts.slice(0, 3).forEach(c => selectedContractIds.add(c.id));
+
+                document.getElementById('res-title').innerText = historyItem.name;
+                document.getElementById('res-meta').innerText = `Найдено: ${data.total} | ${historyItem.ktru}`;
+                
+                document.getElementById('filter-id').value = '';
+                document.getElementById('filter-score').value = '';
+                
+                filteredContracts = [...currentContracts];
+                currentPage = 1;
+                applyAllFilters();
+                switchTab('results');
+                if(window.innerWidth < 1024) document.getElementById('sidebar').classList.add('translate-x-full');
+                
+            } catch (error) {
+                console.error('Error loading results:', error);
+                showToast('Не удалось загрузить результаты поиска', 'error');
+                // Fallback to mock data
+                loadMockResults(historyItem);
+            }
+        }
+
+        // Fallback function for mock results
+        function loadMockResults(historyItem) {
+            const count = historyItem.found || 10;
             const scenario = MOCK_SCENARIOS[historyItem.type] || MOCK_SCENARIOS.generic;
             currentContracts = [];
             selectedContractIds.clear();
@@ -947,15 +1064,23 @@
                      mfrHtml += ` <i class="fas fa-exclamation-triangle text-red-500 ml-1"></i>`;
                 }
 
+                // Create contract ID cell with link if available
+                let contractIdCell = `${c.id}`;
+                if (c.contract_url) {
+                    contractIdCell = `<a href="${c.contract_url}" target="_blank" class="text-blue-600 hover:underline font-mono text-xs">${c.reestr_number || c.id}</a>`;
+                } else if (c.reestr_number) {
+                    contractIdCell = `<span class="font-mono text-xs">${c.reestr_number}</span>`;
+                }
+                
                 tr.innerHTML = `
-                    <td class="p-3 text-center"><input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleSelect(${c.id})"></td>
-                    <td class="p-3 text-blue-600 font-mono text-xs cursor-pointer hover:underline">${c.id}</td>
+                    <td class="p-3 text-center"><input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleSelect('${c.id}')"></td>
+                    <td class="p-3 text-blue-600 font-mono text-xs">${contractIdCell}</td>
                     <td class="p-3 text-sm">${c.date.substring(0,4)}</td>
-                    <td class="p-3 font-bold text-sm">${c.price.toLocaleString('ru-RU')} ₽</td>
+                    <td class="p-3 font-bold text-sm">${c.price.toLocaleString('ru-RU')} ${c.currency || '₽'}</td>
                     <td class="p-3 text-xs font-bold uppercase text-gray-500">${c.type}</td>
                     <td class="p-3 text-xs">${mfrHtml}</td>
                     <td class="p-3 text-xs font-bold">${c.score}%</td>
-                    <td class="p-3 text-center"><button onclick="openComparison(${c.id})" class="text-gray-400 hover:text-blue-600 p-2"><i class="fas fa-eye"></i></button></td>
+                    <td class="p-3 text-center"><button onclick="openComparison('${c.id}')" class="text-gray-400 hover:text-blue-600 p-2"><i class="fas fa-eye"></i></button></td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -977,8 +1102,110 @@
         }
         
         function changePage(d) { currentPage += d; renderResultsTable(); }
-        function openComparison(id) { document.getElementById('comparison-modal').classList.add('open'); }
-        function closeModal() { document.getElementById('comparison-modal').classList.remove('open'); }
+        function openComparison(id) { 
+            // Find the contract in currentContracts
+            const contract = currentContracts.find(c => c.id === id);
+            if (!contract) {
+                showToast('Контракт не найден', 'error');
+                return;
+            }
+            
+            // Update modal title
+            document.getElementById('comp-contract-id').textContent = `Контракт № ${contract.reestr_number || contract.id}`;
+            
+            // Populate comparison table
+            const tbody = document.getElementById('comp-table-body');
+            tbody.innerHTML = '';
+            
+            // Check if we have raw data with specifications
+            if (contract.rawData && contract.rawData.specifications) {
+                // Use specifications from raw data
+                contract.rawData.specifications.forEach(spec => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">${spec.name}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.target || 'Не указано'}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.actual || 'Не указано'}</td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full ${spec.match ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                ${spec.match ? '✓ Совпадает' : '✗ Не совпадает'}
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (contract.specs && contract.specs.length > 0) {
+                // Use specs from mock data
+                contract.specs.forEach(spec => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">${spec.name}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.target}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.actual}</td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full ${spec.match ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                ${spec.match ? '✓ Совпадает' : '✗ Не совпадает'}
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                // No specifications available
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td colspan="4" class="px-4 py-8 text-center text-gray-500">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        Характеристики для сравнения не найдены
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }
+            
+            // Show additional contract info if available
+            if (contract.rawData) {
+                // Add a row for contract URL if available
+                if (contract.contract_url) {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">Ссылка на контракт</td>
+                        <td colspan="3" class="px-4 py-3">
+                            <a href="${contract.contract_url}" target="_blank" class="text-blue-600 hover:underline">
+                                ${contract.contract_url}
+                            </a>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+                
+                // Add manufacturer info
+                if (contract.manufacturer_found) {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    const matchStatus = contract.manufacturer_match ? '✓ Совпадает' : '✗ Не совпадает';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">Производитель</td>
+                        <td class="px-4 py-3 text-gray-600">${contract.targetMfr || 'Не указан'}</td>
+                        <td class="px-4 py-3 text-gray-600">${contract.manufacturer_found}</td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full ${contract.manufacturer_match ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                ${matchStatus}
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            }
+            
+            document.getElementById('comparison-modal').classList.add('open'); 
+        }
+        
+        function closeModal() { 
+            document.getElementById('comparison-modal').classList.remove('open'); 
+        }
         function showToast(msg, type) { 
             const el = document.createElement('div'); el.className = `toast border-${type==='success'?'green':type==='error'?'red':'blue'}-500`; 
             el.innerHTML = `<span>${msg}</span>`; document.getElementById('notification-area').appendChild(el);
