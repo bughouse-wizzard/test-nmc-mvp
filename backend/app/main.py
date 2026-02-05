@@ -29,7 +29,9 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api")
 
 # Mount static files for frontend
-app.mount("/", StaticFiles(directory="../../frontend", html=True), name="frontend")
+import os
+frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "frontend")
+app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
 
 @app.get("/health")
 async def health_check():
