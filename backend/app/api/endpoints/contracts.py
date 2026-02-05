@@ -1,13 +1,17 @@
 """
 Contract-related endpoints.
 """
-from typing import List, Optional
+import logging
+from typing import List, Optional, Dict, Any
 from uuid import UUID
 from fastapi import APIRouter, HTTPException, Query
 from pydantic import BaseModel, Field
 from datetime import datetime
 
+from backend.services.parser.contract import ContractParser
+
 router = APIRouter()
+logger = logging.getLogger(__name__)
 
 
 class ContractResult(BaseModel):
@@ -36,6 +40,41 @@ class SpecComparisonRow(BaseModel):
     actual_value: str
     match_status: str = Field(..., description="MATCH|DIFF|UNKNOWN")
     weight: int = Field(1, ge=1, le=10)
+
+
+class ContractParseResult(BaseModel):
+    """Contract parsing result model."""
+    reestr_number: str
+    contract_url: str
+    common_info: Dict[str, Any]
+    specification: List[Dict[str, Any]]
+    attachments: Dict[str, Any]
+    is_2025_plus: bool
+    unit_prices: List[Dict[str, Any]]
+    parsed_at: str
+
+
+@router.post("/parse", response_model=ContractParseResult)
+async def parse_contract(contract_url: str):
+    """
+    Parse contract data from zakupki.gov.ru URL.
+    
+    Args:
+        contract_url: URL to contract card on zakupki.gov.ru
+        
+    Returns:
+        Parsed contract data
+    """
+    try:
+        async with ContractParser() as parser:
+            parsed_data = await parser.parse_contract(contract_url)
+            return ContractParseResult(**parsed_data)
+    except Exception as e:
+        logger.error(f"Failed to parse contract {contract_url}: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Failed to parse contract: {str(e)}"
+        )
 
 
 @router.get("/{contract_id}", response_model=ContractResult)
