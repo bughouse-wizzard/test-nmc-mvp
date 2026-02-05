@@ -1,18 +1,22 @@
 """
 Search endpoints for contract search and NMCK calculation.
 """
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from uuid import UUID
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends
 from fastapi.responses import StreamingResponse
 import asyncio
 import json
-from pydantic import BaseModel, Field
-from datetime import datetime
+from pydantic import BaseModel, Field, validator
+from datetime import datetime, date
+from sqlalchemy.orm import Session
+from sqlalchemy import desc
 
 from ...core.event_channel import event_channel
 from ...core.events import event_to_sse_format
 from ...worker.tasks import process_search
+from ...db import get_db
+from ...models import SearchRequest, ContractResult, SearchStatus, InputSource, MatchType
 
 router = APIRouter()
 
@@ -25,19 +29,25 @@ class SearchRequestCreate(BaseModel):
     okpd2_code: Optional[str] = Field(None, description="OKPD2 code")
     customer_region: str = Field("СЗФО", description="Customer region")
     law: str = Field("44-ФЗ", description="Procurement law")
-    date_from: date = Field(..., description="Start date for search")
-    date_to: date = Field(..., description="End date for search")
+    date_from: str = Field(..., description="Start date for search (ISO format)")
+    date_to: str = Field(..., description="End date for search (ISO format)")
     execution_statuses: List[str] = Field(
-        ["Исполнение завершено", "Исполнение прекращено"], 
+        ["Исполнение завершено"], 
         description="Execution statuses"
     )
     limit_contracts: int = Field(30, ge=1, le=1000, description="Maximum number of contracts to process")
     input_source: InputSource = Field(InputSource.MANUAL, description="Source of input data")
+    characteristics_text: Optional[str] = Field(None, description="Characteristics text")
+    manufacturer: Optional[str] = Field(None, description="Manufacturer")
     
     @validator('date_to')
     def validate_dates(cls, v, values):
-        if 'date_from' in values and v < values['date_from']:
-            raise ValueError('date_to must be after date_from')
+        if 'date_from' in values:
+            from datetime import datetime
+            date_from = datetime.fromisoformat(values['date_from'].replace('Z', '+00:00'))
+            date_to = datetime.fromisoformat(v.replace('Z', '+00:00'))
+            if date_to < date_from:
+                raise ValueError('date_to must be after date_from')
         return v
 
 
@@ -140,7 +150,7 @@ def process_search_background(search_id: str, db: Session):
         logger = logging.getLogger(__name__)
         logger.error(f"Failed to start background task for search {search_id}: {e}")
         
-        search = db.query(SearchRequestModel).filter(SearchRequestModel.id == search_id).first()
+        search = db.query(SearchRequest).filter(SearchRequest.id == search_id).first()
         if search:
             search.status = SearchStatus.ERROR
             search.error_message = f"Failed to start background task: {str(e)}"
@@ -160,44 +170,24 @@ async def create_search(
     The search runs in the background using Celery.
     """
     from uuid import uuid4
-    from datetime import datetime
     
     # Generate search ID
-    search_id = uuid4()
+    search_id = str(uuid4())
     
-    # Initialize event channel
-    await event_channel.initialize()
+    # Parse dates from ISO strings
+    date_from_dt = datetime.fromisoformat(request.date_from.replace('Z', '+00:00'))
+    date_to_dt = datetime.fromisoformat(request.date_to.replace('Z', '+00:00'))
     
-    # Start background task
-    try:
-        process_search.delay(str(search_id))
-    except Exception as e:
-        # If Celery fails, we can still return the search ID
-        # The frontend will connect to SSE but won't get updates
-        print(f"Warning: Failed to start Celery task: {e}")
-        # Send an immediate error event
-        from ...core.events import ErrorEvent
-        error_event = ErrorEvent(
-            search_id=str(search_id),
-            error_message=f"Failed to start background worker: {str(e)}",
-            error_type="worker_error"
-        )
-        await event_channel.publish(str(search_id), error_event)
-    
-    # TODO: Save search request to database
-    # For now, return response with search ID
-    
-    return SearchResponse(
+    # Create search request in database
+    search_request = SearchRequest(
         id=search_id,
-        status="RUNNING",
-        created_at=datetime.now(),
         object_name=request.object_name,
         ktru_code=request.ktru_code,
         okpd2_code=request.okpd2_code,
         customer_region=request.customer_region,
         law=request.law,
-        date_from=datetime.combine(request.date_from, datetime.min.time()),
-        date_to=datetime.combine(request.date_to, datetime.max.time()),
+        date_from=date_from_dt.date(),
+        date_to=date_to_dt.date(),
         execution_statuses=request.execution_statuses,
         limit_contracts=request.limit_contracts,
         input_source=request.input_source,
@@ -208,8 +198,27 @@ async def create_search(
     db.commit()
     db.refresh(search_request)
     
-    # Add background task
-    background_tasks.add_task(process_search_background, search_request.id, db)
+    # Initialize event channel
+    await event_channel.initialize()
+    
+    # Start background task
+    try:
+        process_search.delay(search_id)
+    except Exception as e:
+        # If Celery fails, update status and send error event
+        print(f"Warning: Failed to start Celery task: {e}")
+        search_request.status = SearchStatus.ERROR
+        search_request.error_message = f"Failed to start background worker: {str(e)}"
+        db.commit()
+        
+        # Send an immediate error event
+        from ...core.events import ErrorEvent
+        error_event = ErrorEvent(
+            search_id=search_id,
+            error_message=f"Failed to start background worker: {str(e)}",
+            error_type="worker_error"
+        )
+        await event_channel.publish(search_id, error_event)
     
     # Convert to response model
     return SearchResponse(
@@ -243,7 +252,7 @@ async def get_search(
     """
     Get details of a specific search.
     """
-    search_request = db.query(SearchRequestModel).filter(SearchRequestModel.id == str(search_id)).first()
+    search_request = db.query(SearchRequest).filter(SearchRequest.id == str(search_id)).first()
     
     if not search_request:
         raise HTTPException(status_code=404, detail="Search not found")
@@ -282,17 +291,17 @@ async def get_search_results(
     Get results of a specific search.
     """
     # Check if search exists
-    search_request = db.query(SearchRequestModel).filter(SearchRequestModel.id == str(search_id)).first()
+    search_request = db.query(SearchRequest).filter(SearchRequest.id == str(search_id)).first()
     if not search_request:
         raise HTTPException(status_code=404, detail="Search not found")
     
     # Get total count
-    total = db.query(ContractResultModel).filter(ContractResultModel.search_id == str(search_id)).count()
+    total = db.query(ContractResult).filter(ContractResult.search_id == str(search_id)).count()
     
     # Get paginated results
-    results = db.query(ContractResultModel)\
-        .filter(ContractResultModel.search_id == str(search_id))\
-        .order_by(desc(ContractResultModel.created_at))\
+    results = db.query(ContractResult)\
+        .filter(ContractResult.search_id == str(search_id))\
+        .order_by(desc(ContractResult.created_at))\
         .offset(skip)\
         .limit(limit)\
         .all()
@@ -336,8 +345,35 @@ async def stop_search(
     """
     Stop a running search.
     """
-    # TODO: Implement report generation
-    raise HTTPException(status_code=404, detail="Report not available")
+    search_request = db.query(SearchRequest).filter(SearchRequest.id == str(search_id)).first()
+    
+    if not search_request:
+        raise HTTPException(status_code=404, detail="Search not found")
+    
+    if search_request.status != SearchStatus.RUNNING:
+        raise HTTPException(status_code=400, detail=f"Search is not running. Current status: {search_request.status}")
+    
+    # Update search status to STOPPED
+    search_request.status = SearchStatus.STOPPED
+    db.commit()
+    
+    # Send stop event via SSE
+    await event_channel.initialize()
+    from ...core.events import DoneEvent
+    stop_event = DoneEvent(
+        search_id=str(search_id),
+        total_found=search_request.found_total or 0,
+        total_processed=search_request.processed_count or 0,
+        nmc_value=search_request.nmc_value,
+        stopped_by_user=True
+    )
+    await event_channel.publish(str(search_id), stop_event)
+    
+    return StopSearchResponse(
+        message="Search stopped successfully",
+        search_id=search_id,
+        status=search_request.status
+    )
 
 
 @router.get("/{search_id}/events")
@@ -416,4 +452,56 @@ async def stream_search_events(search_id: UUID):
             "X-Accel-Buffering": "no",  # Disable buffering for nginx
             "Access-Control-Allow-Origin": "*",  # Allow CORS for SSE
         }
+    )
+
+
+@router.get("/history", response_model=SearchHistoryResponse)
+async def get_search_history(
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    db: Session = Depends(get_db)
+):
+    """
+    Get search history.
+    """
+    # Get total count
+    total = db.query(SearchRequest).count()
+    
+    # Get paginated results
+    searches = db.query(SearchRequest)\
+        .order_by(desc(SearchRequest.created_at))\
+        .offset(skip)\
+        .limit(limit)\
+        .all()
+    
+    # Convert to response models
+    search_responses = []
+    for search in searches:
+        search_responses.append(SearchResponse(
+            id=UUID(search.id),
+            status=search.status,
+            created_at=search.created_at,
+            object_name=search.object_name,
+            ktru_code=search.ktru_code,
+            okpd2_code=search.okpd2_code,
+            customer_region=search.customer_region,
+            law=search.law,
+            date_from=search.date_from,
+            date_to=search.date_to,
+            execution_statuses=search.execution_statuses,
+            limit_contracts=search.limit_contracts,
+            input_source=search.input_source,
+            found_total=search.found_total,
+            processed_count=search.processed_count,
+            nmc_value=search.nmc_value,
+            selected_contract_ids=search.selected_contract_ids,
+            runtime_ms=search.runtime_ms,
+            error_message=search.error_message
+        ))
+    
+    return SearchHistoryResponse(
+        searches=search_responses,
+        total=total,
+        page=skip // limit + 1 if limit > 0 else 1,
+        limit=limit
     )
