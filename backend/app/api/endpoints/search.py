@@ -106,29 +106,43 @@ class StopSearchResponse(BaseModel):
     status: SearchStatus
 
 
-# Background task function (placeholder for actual implementation)
+# Background task function using Celery worker
 def process_search_background(search_id: str, db: Session):
     """
-    Background task to process search request.
+    Background task to process search request using Celery worker.
     
     Args:
         search_id: ID of the search request
         db: Database session
     """
-    # This would contain the actual search logic
-    # For now, we'll just update the status to DONE after a delay
-    import time
-    time.sleep(2)  # Simulate processing
-    
-    # Update search status
-    search = db.query(SearchRequestModel).filter(SearchRequestModel.id == search_id).first()
-    if search:
-        search.status = SearchStatus.DONE
-        search.found_total = 10  # Example value
-        search.processed_count = 5  # Example value
-        search.nmc_value = 150000.0  # Example value
-        search.runtime_ms = 2000  # Example value
-        db.commit()
+    try:
+        # Import Celery app and task
+        from backend.celery_app import celery_app
+        from backend.services.worker.tasks import process_search_task
+        
+        # Send task to Celery worker
+        task_result = process_search_task.delay(search_id)
+        
+        # Store task ID in search request for future reference
+        search = db.query(SearchRequestModel).filter(SearchRequestModel.id == search_id).first()
+        if search:
+            # Store task ID in raw_data_json or create a new field
+            if not search.raw_data_json:
+                search.raw_data_json = {}
+            search.raw_data_json["celery_task_id"] = task_result.id
+            db.commit()
+            
+    except Exception as e:
+        # Log error and update search status
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to start background task for search {search_id}: {e}")
+        
+        search = db.query(SearchRequestModel).filter(SearchRequestModel.id == search_id).first()
+        if search:
+            search.status = SearchStatus.ERROR
+            search.error_message = f"Failed to start background task: {str(e)}"
+            db.commit()
 
 
 @router.post("/", response_model=SearchResponse)
@@ -301,8 +315,29 @@ async def stop_search(
         search_request.status = SearchStatus.STOPPED
         db.commit()
         
-        # TODO: Actually signal the background worker to stop
-        # This would involve Celery task revocation or similar mechanism
+        # Set STOP signal in Redis
+        try:
+            import redis
+            from backend.app.core.config import settings
+            
+            redis_client = redis.Redis.from_url(settings.REDIS_URL)
+            stop_key = f"search_stop:{search_id}"
+            redis_client.set(stop_key, "STOP", ex=3600)  # Expire after 1 hour
+            
+            # Also try to revoke Celery task if we have task ID
+            if search_request.raw_data_json and "celery_task_id" in search_request.raw_data_json:
+                from backend.celery_app import celery_app
+                celery_app.control.revoke(
+                    search_request.raw_data_json["celery_task_id"],
+                    terminate=True,
+                    signal='SIGTERM'
+                )
+                
+        except Exception as e:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error setting STOP signal for search {search_id}: {e}")
+            # Continue anyway - the worker will check the status in DB
     
     return StopSearchResponse(
         message=f"Search {search_id} stopped successfully",
