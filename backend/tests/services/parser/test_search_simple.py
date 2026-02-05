@@ -53,7 +53,8 @@ def test_build_search_url():
     assert url.startswith(parser.search_url)
     assert "?searchString=03121110-1" in url
     assert "selectedFz=fz44" in url
-    assert "selectedRegions=СЗФО" in url
+    # Check for URL-encoded version of "СЗФО"
+    assert "selectedRegions=%D0%A1%D0%97%D0%A4%D0%9E" in url
     
     print("✓ test_build_search_url passed")
 

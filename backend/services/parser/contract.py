@@ -160,6 +160,61 @@ class ContractParser:
             return match.group(1)
         raise ValueError(f"Could not extract reestr number from URL: {url}")
     
+    def _get_common_info_url(self, url: str) -> str:
+        """
+        Transform any contract URL to common-info.html format.
+        
+        Args:
+            url: Any contract URL (e.g., document-info.html, payment-info.html, etc.)
+            
+        Returns:
+            URL to the common-info.html page
+        """
+        # If already a common-info URL, return as-is
+        if 'common-info.html' in url:
+            return url
+        
+        # Extract reestr number
+        reestr_number = self._extract_reestr_number(url)
+        
+        # Build common info URL
+        return f"{self.base_url}/epz/contract/contractCard/common-info.html?reestrNumber={reestr_number}"
+    
+    def _extract_contract_year(self, contract_data: Dict[str, Any]) -> int:
+        """
+        Extract year from contract data.
+        
+        Args:
+            contract_data: Dictionary containing contract information
+            
+        Returns:
+            Extracted year as integer
+        """
+        # Try to get year from sign_date
+        if 'sign_date' in contract_data:
+            sign_date = contract_data['sign_date']
+            if isinstance(sign_date, datetime):
+                return sign_date.year
+            elif isinstance(sign_date, str):
+                # Try to parse date string
+                try:
+                    parsed_date = self._parse_date(sign_date)
+                    return parsed_date.year
+                except:
+                    pass
+        
+        # Try to extract year from URL or other fields
+        if 'contract_url' in contract_data:
+            url = contract_data['contract_url']
+            # Look for year in URL pattern
+            year_match = re.search(r'/(\d{4})/', url)
+            if year_match:
+                return int(year_match.group(1))
+        
+        # Default to current year if cannot determine
+        logger.warning(f"Could not extract year from contract data, using current year")
+        return datetime.now().year
+    
     async def _fetch_page(self, url: str) -> str:
         """Fetch HTML page content asynchronously."""
         try:
@@ -253,6 +308,19 @@ class ContractParser:
         
         return line_items
     
+    def _parse_specification(self, html: str) -> List[ContractLineItem]:
+        """
+        Parse contract specification (line items).
+        Alias for _parse_payments_tab for backward compatibility.
+        
+        Args:
+            html: HTML content of specification/payments tab
+            
+        Returns:
+            List of ContractLineItem objects
+        """
+        return self._parse_payments_tab(html)
+    
     def _parse_line_item_row(self, cells: List) -> Optional[ContractLineItem]:
         """Parse a single row into a line item."""
         # This is a simplified parser - actual implementation depends on HTML structure
@@ -332,6 +400,20 @@ class ContractParser:
         
         return attachments
     
+    def _identify_attachments(self, html: str, base_url: str) -> List[ContractAttachment]:
+        """
+        Identify and categorize attachments.
+        Alias for _parse_attachments_tab for backward compatibility.
+        
+        Args:
+            html: HTML content of attachments tab
+            base_url: Base URL for resolving relative links
+            
+        Returns:
+            List of ContractAttachment objects
+        """
+        return self._parse_attachments_tab(html, base_url)
+    
     def _find_printed_form(self, attachments: List[ContractAttachment]) -> Optional[ContractAttachment]:
         """Find printed form among attachments."""
         for attachment in attachments:
@@ -344,6 +426,34 @@ class ContractParser:
                 return attachment
         
         return None
+    
+    def _extract_unit_prices(self, line_items: List[ContractLineItem]) -> List[Dict[str, Any]]:
+        """
+        Extract unit prices from line items.
+        
+        Args:
+            line_items: List of ContractLineItem objects
+            
+        Returns:
+            List of dictionaries with unit price information
+        """
+        unit_prices = []
+        
+        for item in line_items:
+            if item.unit_price is not None:
+                unit_price_info = {
+                    'item_number': item.item_number,
+                    'name': item.name,
+                    'unit': item.unit,
+                    'quantity': item.quantity,
+                    'unit_price': item.unit_price,
+                    'total_price': item.total_price,
+                    'okpd2_code': item.okpd2_code,
+                    'ktru_code': item.ktru_code
+                }
+                unit_prices.append(unit_price_info)
+        
+        return unit_prices
     
     async def _download_printed_form(self, attachment: ContractAttachment) -> str:
         """Download printed form to temporary storage asynchronously."""
@@ -435,6 +545,34 @@ class ContractParser:
             logger.debug(f"Could not parse price: {price_str}")
             return None
     
+    def _extract_currency(self, price_str: str) -> str:
+        """
+        Extract currency from price string.
+        
+        Args:
+            price_str: Price string (e.g., "100 USD", "200 €", "300 РУБ")
+            
+        Returns:
+            Currency code (USD, EUR, RUB)
+        """
+        if not price_str:
+            return "RUB"  # Default currency
+        
+        price_str_upper = price_str.upper()
+        
+        # Check for currency indicators
+        if "USD" in price_str_upper or "$" in price_str:
+            return "USD"
+        elif "EUR" in price_str_upper or "€" in price_str:
+            return "EUR"
+        elif "RUB" in price_str_upper or "РУБ" in price_str_upper or "₽" in price_str or "РУБ." in price_str_upper:
+            return "RUB"
+        elif "RUR" in price_str_upper:  # Old Russian ruble code
+            return "RUB"
+        
+        # Default to RUB for Russian procurement
+        return "RUB"
+    
     def _parse_float(self, value_str: str) -> Optional[float]:
         """Parse any float value."""
         return self._parse_price(value_str)
@@ -496,6 +634,47 @@ class ContractParser:
                     logger.debug(f"Cleaned up temp file: {file_path}")
             except Exception as e:
                 logger.warning(f"Failed to delete temp file {file_path}: {e}")
+    
+    async def _fetch_html(self, url: str) -> str:
+        """
+        Fetch HTML content from URL.
+        Alias for _fetch_page for backward compatibility.
+        
+        Args:
+            url: URL to fetch
+            
+        Returns:
+            HTML content as string
+        """
+        return await self._fetch_page(url)
+    
+    async def _download_file(self, url: str, file_path: str) -> str:
+        """
+        Download file from URL.
+        Simplified version for backward compatibility.
+        
+        Args:
+            url: URL to download from
+            file_path: Path to save the file
+            
+        Returns:
+            Path to downloaded file
+        """
+        # Create a temporary attachment object
+        from urllib.parse import urlparse
+        file_name = os.path.basename(urlparse(url).path)
+        file_ext = os.path.splitext(file_name)[1].lstrip('.')
+        
+        temp_attachment = ContractAttachment(
+            name=file_name,
+            url=url,
+            file_type=file_ext,
+            is_printed_form=False
+        )
+        
+        # Use existing download logic
+        return await self._download_printed_form(temp_attachment)
+    
     async def cleanup(self):
         """Clean up temporary files and resources."""
         try:
