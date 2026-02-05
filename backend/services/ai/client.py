@@ -176,20 +176,55 @@ class DeepSeekClient:
             if key not in request_params:
                 request_params[key] = value
         
+        # Log request for debugging
+        debug_data = {
+            "request": {
+                "model": request_params.get("model"),
+                "messages": final_messages,
+                "temperature": request_params.get("temperature"),
+                "max_tokens": request_params.get("max_tokens"),
+                "system_prompt": system_prompt
+            }
+        }
+        
         # Retry logic
         last_exception = None
         for attempt in range(self.max_retries):
             try:
                 logger.debug(f"Making DeepSeek API request (attempt {attempt + 1}/{self.max_retries})")
                 response = self.client.chat.completions.create(**request_params)
+                
+                # Log response for debugging
+                debug_data["response"] = {
+                    "id": response.id,
+                    "model": response.model,
+                    "created": response.created,
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens if response.usage else None,
+                        "completion_tokens": response.usage.completion_tokens if response.usage else None,
+                        "total_tokens": response.usage.total_tokens if response.usage else None
+                    } if response.usage else None,
+                    "choices_count": len(response.choices),
+                    "raw_content": response.choices[0].message.content if response.choices else None
+                }
+                
+                # Store debug data in response for later use
+                response.debug_data = debug_data
+                
                 return response
             except Exception as e:
                 last_exception = e
+                debug_data["error"] = {
+                    "attempt": attempt + 1,
+                    "error": str(e),
+                    "type": type(e).__name__
+                }
                 logger.warning(f"DeepSeek API request failed (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:
                     time.sleep(self.retry_delay)
         
         # If we get here, all retries failed
+        debug_data["final_error"] = str(last_exception)
         raise Exception(f"DeepSeek API request failed after {self.max_retries} attempts: {last_exception}")
     
     async def _make_async_request(
@@ -227,19 +262,54 @@ class DeepSeekClient:
             if key not in request_params:
                 request_params[key] = value
         
+        # Log request for debugging
+        debug_data = {
+            "request": {
+                "model": request_params.get("model"),
+                "messages": final_messages,
+                "temperature": request_params.get("temperature"),
+                "max_tokens": request_params.get("max_tokens"),
+                "system_prompt": system_prompt
+            }
+        }
+        
         # Retry logic
         last_exception = None
         for attempt in range(self.max_retries):
             try:
                 logger.debug(f"Making async DeepSeek API request (attempt {attempt + 1}/{self.max_retries})")
                 response = await self.async_client.chat.completions.create(**request_params)
+                
+                # Log response for debugging
+                debug_data["response"] = {
+                    "id": response.id,
+                    "model": response.model,
+                    "created": response.created,
+                    "usage": {
+                        "prompt_tokens": response.usage.prompt_tokens if response.usage else None,
+                        "completion_tokens": response.usage.completion_tokens if response.usage else None,
+                        "total_tokens": response.usage.total_tokens if response.usage else None
+                    } if response.usage else None,
+                    "choices_count": len(response.choices),
+                    "raw_content": response.choices[0].message.content if response.choices else None
+                }
+                
+                # Store debug data in response for later use
+                response.debug_data = debug_data
+                
                 return response
             except Exception as e:
                 last_exception = e
+                debug_data["error"] = {
+                    "attempt": attempt + 1,
+                    "error": str(e),
+                    "type": type(e).__name__
+                }
                 logger.warning(f"Async DeepSeek API request failed (attempt {attempt + 1}): {e}")
                 if attempt < self.max_retries - 1:
                     await asyncio.sleep(self.retry_delay)
         
+        debug_data["final_error"] = str(last_exception)
         raise Exception(f"Async DeepSeek API request failed after {self.max_retries} attempts: {last_exception}")
     
     def extract_specs_from_tz(self, text: str, **kwargs) -> Dict[str, Any]:
@@ -267,7 +337,11 @@ class DeepSeekClient:
         
         # Parse JSON response
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            # Add debug data to result
+            if hasattr(response, 'debug_data'):
+                result["_debug"] = response.debug_data
+            return result
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}\nResponse: {content}")
             raise ValueError(f"Invalid JSON response from AI: {e}")
@@ -289,7 +363,11 @@ class DeepSeekClient:
         content = response.choices[0].message.content
         
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            # Add debug data to result
+            if hasattr(response, 'debug_data'):
+                result["_debug"] = response.debug_data
+            return result
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}\nResponse: {content}")
             raise ValueError(f"Invalid JSON response from AI: {e}")
@@ -318,7 +396,11 @@ class DeepSeekClient:
         content = response.choices[0].message.content
         
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            # Add debug data to result
+            if hasattr(response, 'debug_data'):
+                result["_debug"] = response.debug_data
+            return result
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}\nResponse: {content}")
             raise ValueError(f"Invalid JSON response from AI: {e}")
@@ -340,7 +422,11 @@ class DeepSeekClient:
         content = response.choices[0].message.content
         
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            # Add debug data to result
+            if hasattr(response, 'debug_data'):
+                result["_debug"] = response.debug_data
+            return result
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}\nResponse: {content}")
             raise ValueError(f"Invalid JSON response from AI: {e}")
@@ -378,7 +464,11 @@ class DeepSeekClient:
         content = response.choices[0].message.content
         
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            # Add debug data to result
+            if hasattr(response, 'debug_data'):
+                result["_debug"] = response.debug_data
+            return result
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}\nResponse: {content}")
             raise ValueError(f"Invalid JSON response from AI: {e}")
@@ -408,7 +498,11 @@ class DeepSeekClient:
         content = response.choices[0].message.content
         
         try:
-            return json.loads(content)
+            result = json.loads(content)
+            # Add debug data to result
+            if hasattr(response, 'debug_data'):
+                result["_debug"] = response.debug_data
+            return result
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse JSON response: {e}\nResponse: {content}")
             raise ValueError(f"Invalid JSON response from AI: {e}")

@@ -173,7 +173,7 @@ class ContractProcessor:
                 except Exception as e:
                     logger.warning(f"Failed to read printed form: {e}")
             
-            # Call AI client
+            # Call AI client and capture raw response
             contract_specs = await self.ai_client.extract_specs_from_contract_doc_async(
                 analysis_text
             )
@@ -353,6 +353,16 @@ class ContractProcessor:
         # Get match type from comparison result
         match_type_str = comparison_result.get("match_type", "NO_MATCH")
         
+        # Create clean copies of contract_specs and comparison_result without debug data
+        contract_specs_clean = contract_specs.copy() if isinstance(contract_specs, dict) else contract_specs
+        comparison_result_clean = comparison_result.copy() if isinstance(comparison_result, dict) else comparison_result
+        
+        # Remove debug data from clean copies
+        if isinstance(contract_specs_clean, dict) and "_debug" in contract_specs_clean:
+            contract_specs_clean = {k: v for k, v in contract_specs_clean.items() if k != "_debug"}
+        if isinstance(comparison_result_clean, dict) and "_debug" in comparison_result_clean:
+            comparison_result_clean = {k: v for k, v in comparison_result_clean.items() if k != "_debug"}
+        
         # Create raw data for ContractResult
         raw_data = {
             "contract_info": {
@@ -366,8 +376,19 @@ class ContractProcessor:
                 "attachments_count": len(contract_info.attachments),
                 "has_printed_form": contract_info.printed_form_path is not None
             },
-            "contract_specs": contract_specs,
-            "comparison_result": comparison_result
+            "contract_specs": contract_specs_clean,
+            "comparison_result": comparison_result_clean,
+            "debug_data": {
+                "parser_html": {
+                    "common_info_html_sample": contract_info.raw_html[:5000] if contract_info.raw_html else None,
+                    "common_info_html_length": len(contract_info.raw_html) if contract_info.raw_html else 0,
+                    "has_printed_form": contract_info.printed_form_path is not None,
+                    "printed_form_path": contract_info.printed_form_path
+                },
+                "ai_extraction_debug": contract_specs.get("_debug") if isinstance(contract_specs, dict) else None,
+                "ai_comparison_debug": comparison_result.get("_debug") if isinstance(comparison_result, dict) else None,
+                "processing_timestamp": datetime.now().isoformat()
+            }
         }
         
         # Create contract result dictionary (will be converted to model in tasks.py)
