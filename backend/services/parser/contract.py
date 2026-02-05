@@ -9,17 +9,20 @@ This module implements logic to:
 4. Handle extraction of Unit Prices from the structured HTML table if available.
 """
 
+import asyncio
+import logging
 import os
 import re
 import tempfile
-import logging
-from typing import Dict, List, Optional, Any, Tuple
 from datetime import datetime
 from dataclasses import dataclass, asdict
 from pathlib import Path
+from typing import Dict, List, Optional, Any, Tuple, BinaryIO
+from urllib.parse import urljoin, urlparse
 
-import requests
+import aiohttp
 from bs4 import BeautifulSoup
+import httpx
 import pdfplumber
 from docx import Document
 
@@ -71,32 +74,38 @@ class ContractInfo:
 
 
 class ContractParser:
-    """Parser for contract details and attachments from zakupki.gov.ru."""
+    """Parser for zakupki.gov.ru contract details and attachments."""
     
-    def __init__(self, session: Optional[requests.Session] = None, 
-                 temp_dir: Optional[str] = None,
-                 min_year_for_printed_form: int = 2025):
+    def __init__(
+        self,
+        base_url: str = "https://zakupki.gov.ru",
+        session: Optional[aiohttp.ClientSession] = None,
+        http_client: Optional[httpx.AsyncClient] = None,
+        temp_dir: Optional[str] = None,
+        year_threshold: int = 2025
+    ):
         """
         Initialize the contract parser.
         
         Args:
-            session: Optional requests.Session to use for HTTP requests
+            base_url: Base URL for zakupki.gov.ru
+            session: Optional aiohttp ClientSession for HTTP requests
+            http_client: Optional httpx AsyncClient for HTTP requests
             temp_dir: Directory for temporary file storage
-            min_year_for_printed_form: Minimum year to download printed forms (default: 2025)
+            year_threshold: Year threshold for downloading printed forms (default: 2025)
         """
-        self.session = session or requests.Session()
-        self.temp_dir = temp_dir or tempfile.gettempdir()
-        self.min_year_for_printed_form = min_year_for_printed_form
+        self.base_url = base_url.rstrip('/')
+        self.session = session
+        self.http_client = http_client
+        self.year_threshold = year_threshold
         
-        # Configure session headers to mimic a browser
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Accept-Encoding': 'gzip, deflate, br',
-        })
+        # Create temporary directory if not provided
+        self.temp_dir = Path(temp_dir) if temp_dir else Path(tempfile.mkdtemp(prefix="contract_parser_"))
+        self.temp_dir.mkdir(parents=True, exist_ok=True)
+        
+        logger.info(f"ContractParser initialized with temp_dir: {self.temp_dir}")
     
-    def parse_contract(self, contract_url: str) -> ContractInfo:
+    async def parse_contract(self, contract_url: str) -> ContractInfo:
         """
         Parse contract details from the given URL.
         
@@ -112,13 +121,13 @@ class ContractParser:
         reestr_number = self._extract_reestr_number(contract_url)
         
         # Fetch and parse common info page
-        common_info_html = self._fetch_page(contract_url)
+        common_info_html = await self._fetch_page(contract_url)
         contract_info = self._parse_common_info(common_info_html, contract_url, reestr_number)
         
         # Try to fetch and parse payments/specifications tab
         try:
             payments_url = self._build_payments_url(contract_url)
-            payments_html = self._fetch_page(payments_url)
+            payments_html = await self._fetch_page(payments_url)
             line_items = self._parse_payments_tab(payments_html)
             contract_info.line_items = line_items
         except Exception as e:
@@ -128,15 +137,15 @@ class ContractParser:
         # Identify and process attachments
         try:
             attachments_url = self._build_attachments_url(contract_url)
-            attachments_html = self._fetch_page(attachments_url)
+            attachments_html = await self._fetch_page(attachments_url)
             attachments = self._parse_attachments_tab(attachments_html, contract_url)
             contract_info.attachments = attachments
             
-            # Download printed form if contract is from 2025 or later
-            if contract_info.sign_date.year >= self.min_year_for_printed_form:
+            # Download printed form if contract is from threshold year or later
+            if contract_info.sign_date.year >= self.year_threshold:
                 printed_form = self._find_printed_form(attachments)
                 if printed_form:
-                    printed_form_path = self._download_printed_form(printed_form)
+                    printed_form_path = await self._download_printed_form(printed_form)
                     contract_info.printed_form_path = printed_form_path
         except Exception as e:
             logger.warning(f"Failed to parse attachments: {e}")
@@ -151,13 +160,26 @@ class ContractParser:
             return match.group(1)
         raise ValueError(f"Could not extract reestr number from URL: {url}")
     
-    def _fetch_page(self, url: str) -> str:
-        """Fetch HTML page content."""
+    async def _fetch_page(self, url: str) -> str:
+        """Fetch HTML page content asynchronously."""
         try:
-            response = self.session.get(url, timeout=30)
-            response.raise_for_status()
-            return response.text
-        except requests.RequestException as e:
+            # Try aiohttp session first
+            if self.session:
+                async with self.session.get(url, timeout=aiohttp.ClientTimeout(total=30)) as response:
+                    response.raise_for_status()
+                    return await response.text()
+            # Fall back to httpx client
+            elif self.http_client:
+                response = await self.http_client.get(url)
+                response.raise_for_status()
+                return response.text
+            else:
+                # Create a temporary httpx client
+                async with httpx.AsyncClient(timeout=30.0) as client:
+                    response = await client.get(url)
+                    response.raise_for_status()
+                    return response.text
+        except Exception as e:
             logger.error(f"Failed to fetch URL {url}: {e}")
             raise
     
@@ -323,12 +345,9 @@ class ContractParser:
         
         return None
     
-    def _download_printed_form(self, attachment: ContractAttachment) -> str:
-        """Download printed form to temporary storage."""
+    async def _download_printed_form(self, attachment: ContractAttachment) -> str:
+        """Download printed form to temporary storage asynchronously."""
         try:
-            response = self.session.get(attachment.url, stream=True, timeout=60)
-            response.raise_for_status()
-            
             # Create temp file
             temp_file = tempfile.NamedTemporaryFile(
                 suffix=f'.{attachment.file_type}',
@@ -336,9 +355,27 @@ class ContractParser:
                 delete=False
             )
             
-            # Write content
-            for chunk in response.iter_content(chunk_size=8192):
-                temp_file.write(chunk)
+            # Download content asynchronously
+            if self.session:
+                async with self.session.get(attachment.url) as response:
+                    response.raise_for_status()
+                    # Write content in chunks
+                    with open(temp_file.name, 'wb') as f:
+                        async for chunk in response.content.iter_chunked(8192):
+                            f.write(chunk)
+            elif self.http_client:
+                async with self.http_client.stream('GET', attachment.url) as response:
+                    response.raise_for_status()
+                    with open(temp_file.name, 'wb') as f:
+                        async for chunk in response.aiter_bytes():
+                            f.write(chunk)
+            else:
+                async with httpx.AsyncClient() as client:
+                    async with client.stream('GET', attachment.url) as response:
+                        response.raise_for_status()
+                        with open(temp_file.name, 'wb') as f:
+                            async for chunk in response.aiter_bytes():
+                                f.write(chunk)
             
             temp_file.close()
             logger.info(f"Downloaded printed form to: {temp_file.name}")
@@ -459,3 +496,48 @@ class ContractParser:
                     logger.debug(f"Cleaned up temp file: {file_path}")
             except Exception as e:
                 logger.warning(f"Failed to delete temp file {file_path}: {e}")
+    async def cleanup(self):
+        """Clean up temporary files and resources."""
+        try:
+            # Remove temporary directory and all its contents
+            import shutil
+            if self.temp_dir.exists():
+                shutil.rmtree(self.temp_dir)
+                logger.info(f"Cleaned up temp directory: {self.temp_dir}")
+        except Exception as e:
+            logger.warning(f"Error cleaning up temp directory: {e}")
+
+
+# Factory function for easier usage
+async def create_contract_parser(
+    base_url: str = "https://zakupki.gov.ru",
+    temp_dir: Optional[str] = None,
+    year_threshold: int = 2025
+) -> ContractParser:
+    """
+    Create a ContractParser instance with proper HTTP client.
+
+    Args:
+        base_url: Base URL for zakupki.gov.ru
+        temp_dir: Directory for temporary file storage
+        year_threshold: Year threshold for downloading printed forms
+
+    Returns:
+        ContractParser instance
+    """
+    # Create HTTP client
+    http_client = httpx.AsyncClient(
+        timeout=httpx.Timeout(30.0),
+        headers={
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+        }
+    )
+
+    return ContractParser(
+        base_url=base_url,
+        http_client=http_client,
+        temp_dir=temp_dir,
+        year_threshold=year_threshold
+    )
