@@ -1,12 +1,32 @@
 """
 FastAPI main application entry point.
 """
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
 from .api import router as api_router
 from .core.config import settings
+from .core.event_channel import event_channel
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Lifespan context manager for FastAPI application.
+    Handles startup and shutdown events.
+    """
+    # Startup
+    print("Initializing event channel...")
+    await event_channel.initialize()
+    
+    yield
+    
+    # Shutdown
+    print("Closing event channel...")
+    await event_channel.close()
+
 
 app = FastAPI(
     title="NMCK Calculation System API",
@@ -14,6 +34,7 @@ app = FastAPI(
     version="1.0.0",
     docs_url="/api/docs",
     redoc_url="/api/redoc",
+    lifespan=lifespan,
 )
 
 # Configure CORS
@@ -29,9 +50,13 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api")
 
 # Mount static files for frontend
-import os
-frontend_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "frontend")
-app.mount("/", StaticFiles(directory=frontend_dir, html=True), name="frontend")
+# Note: This path assumes the backend is running from the project root
+# In production, this would be handled by nginx
+try:
+    app.mount("/", StaticFiles(directory="../../frontend", html=True), name="frontend")
+except RuntimeError:
+    # If the path doesn't exist, don't mount it
+    pass
 
 @app.get("/health")
 async def health_check():

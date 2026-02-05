@@ -1,16 +1,18 @@
 """
 Search endpoints for contract search and NMCK calculation.
 """
-from typing import List, Optional, Dict, Any
-from uuid import UUID, uuid4
-from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Depends
-from pydantic import BaseModel, Field, validator
-from datetime import datetime, date
-from sqlalchemy.orm import Session
-from sqlalchemy import desc
+from typing import List, Optional
+from uuid import UUID
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
+from pydantic import BaseModel, Field
+from datetime import datetime
 
-from backend.models import SearchRequest as SearchRequestModel, SearchStatus, InputSource, ContractResult as ContractResultModel
-from backend.app.db import get_db
+from ...core.event_channel import event_channel
+from ...core.events import event_to_sse_format
+from ...worker.tasks import process_search
 
 router = APIRouter()
 
@@ -155,11 +157,40 @@ async def create_search(
     Create a new search for contracts.
     
     This endpoint initiates a search for contracts based on the provided criteria.
-    The search runs in the background.
+    The search runs in the background using Celery.
     """
-    # Create search request in database
-    search_request = SearchRequestModel(
-        id=str(uuid4()),
+    from uuid import uuid4
+    from datetime import datetime
+    
+    # Generate search ID
+    search_id = uuid4()
+    
+    # Initialize event channel
+    await event_channel.initialize()
+    
+    # Start background task
+    try:
+        process_search.delay(str(search_id))
+    except Exception as e:
+        # If Celery fails, we can still return the search ID
+        # The frontend will connect to SSE but won't get updates
+        print(f"Warning: Failed to start Celery task: {e}")
+        # Send an immediate error event
+        from ...core.events import ErrorEvent
+        error_event = ErrorEvent(
+            search_id=str(search_id),
+            error_message=f"Failed to start background worker: {str(e)}",
+            error_type="worker_error"
+        )
+        await event_channel.publish(str(search_id), error_event)
+    
+    # TODO: Save search request to database
+    # For now, return response with search ID
+    
+    return SearchResponse(
+        id=search_id,
+        status="RUNNING",
+        created_at=datetime.now(),
         object_name=request.object_name,
         ktru_code=request.ktru_code,
         okpd2_code=request.okpd2_code,
@@ -305,109 +336,82 @@ async def stop_search(
     """
     Stop a running search.
     """
-    search_request = db.query(SearchRequestModel).filter(SearchRequestModel.id == str(search_id)).first()
+    # TODO: Implement report generation
+    raise HTTPException(status_code=404, detail="Report not available")
+
+
+@router.get("/{search_id}/events")
+async def stream_search_events(search_id: UUID):
+    """
+    Stream Server-Sent Events (SSE) for a specific search.
     
-    if not search_request:
-        raise HTTPException(status_code=404, detail="Search not found")
+    This endpoint provides real-time updates about search progress,
+    including:
+    - progress: processed count and total found
+    - result_added: new contract found and analyzed
+    - done: search completed
+    - error: error occurred during processing
     
-    # Only stop if currently running
-    if search_request.status == SearchStatus.RUNNING:
-        search_request.status = SearchStatus.STOPPED
-        db.commit()
-        
-        # Set STOP signal in Redis
+    The stream follows the SSE format:
+    event: <event_type>
+    data: <json_data>
+    
+    Example events:
+    event: progress
+    data: {"type": "progress", "search_id": "...", "processed_count": 5, "found_total": 25, ...}
+    
+    event: result_added
+    data: {"type": "result_added", "search_id": "...", "contract_id": "...", ...}
+    """
+    # Initialize event channel
+    await event_channel.initialize()
+    
+    async def event_generator():
+        """
+        Generator function that yields SSE-formatted events.
+        """
         try:
-            import redis
-            from backend.app.core.config import settings
-            
-            redis_client = redis.Redis.from_url(settings.REDIS_URL)
-            stop_key = f"search_stop:{search_id}"
-            redis_client.set(stop_key, "STOP", ex=3600)  # Expire after 1 hour
-            
-            # Also try to revoke Celery task if we have task ID
-            if search_request.raw_data_json and "celery_task_id" in search_request.raw_data_json:
-                from backend.celery_app import celery_app
-                celery_app.control.revoke(
-                    search_request.raw_data_json["celery_task_id"],
-                    terminate=True,
-                    signal='SIGTERM'
-                )
+            # Subscribe to events for this search
+            async for event_data in event_channel.subscribe(search_id):
+                # Parse the event data
+                event_dict = json.loads(event_data)
                 
+                # Convert to SSE format
+                # Note: In a real implementation, we would reconstruct the event object
+                # from the JSON and use event_to_sse_format. For simplicity, we'll
+                # send the raw JSON with appropriate SSE formatting.
+                
+                # Determine event type from the data
+                event_type = event_dict.get("type", "message")
+                
+                # Format as SSE
+                yield f"event: {event_type}\n"
+                yield f"data: {event_data}\n\n"
+                
+                # Keep connection alive
+                await asyncio.sleep(0.1)
+                
+        except asyncio.CancelledError:
+            # Client disconnected
+            print(f"Client disconnected from SSE stream for search {search_id}")
         except Exception as e:
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error setting STOP signal for search {search_id}: {e}")
-            # Continue anyway - the worker will check the status in DB
+            # Send error as SSE event
+            error_event = {
+                "type": "error",
+                "search_id": str(search_id),
+                "error_message": f"Error in event stream: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+            yield f"event: error\n"
+            yield f"data: {json.dumps(error_event)}\n\n"
     
-    return StopSearchResponse(
-        message=f"Search {search_id} stopped successfully",
-        search_id=search_id,
-        status=search_request.status
-    )
-
-
-@router.get("/history", response_model=SearchHistoryResponse)
-async def get_search_history(
-    skip: int = Query(0, ge=0, description="Number of records to skip"),
-    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
-    status: Optional[SearchStatus] = Query(None, description="Filter by status"),
-    date_from: Optional[date] = Query(None, description="Filter by creation date from"),
-    date_to: Optional[date] = Query(None, description="Filter by creation date to"),
-    db: Session = Depends(get_db)
-):
-    """
-    Get search history with filters.
-    """
-    # Build query
-    query = db.query(SearchRequestModel)
-    
-    # Apply filters
-    if status:
-        query = query.filter(SearchRequestModel.status == status)
-    
-    if date_from:
-        query = query.filter(SearchRequestModel.created_at >= datetime.combine(date_from, datetime.min.time()))
-    
-    if date_to:
-        query = query.filter(SearchRequestModel.created_at <= datetime.combine(date_to, datetime.max.time()))
-    
-    # Get total count
-    total = query.count()
-    
-    # Get paginated results
-    searches = query.order_by(desc(SearchRequestModel.created_at))\
-        .offset(skip)\
-        .limit(limit)\
-        .all()
-    
-    # Convert to response models
-    search_responses = []
-    for search in searches:
-        search_responses.append(SearchResponse(
-            id=UUID(search.id),
-            status=search.status,
-            created_at=search.created_at,
-            object_name=search.object_name,
-            ktru_code=search.ktru_code,
-            okpd2_code=search.okpd2_code,
-            customer_region=search.customer_region,
-            law=search.law,
-            date_from=search.date_from,
-            date_to=search.date_to,
-            execution_statuses=search.execution_statuses,
-            limit_contracts=search.limit_contracts,
-            input_source=search.input_source,
-            found_total=search.found_total,
-            processed_count=search.processed_count,
-            nmc_value=search.nmc_value,
-            selected_contract_ids=search.selected_contract_ids,
-            runtime_ms=search.runtime_ms,
-            error_message=search.error_message
-        ))
-    
-    return SearchHistoryResponse(
-        searches=search_responses,
-        total=total,
-        page=skip // limit + 1 if limit > 0 else 1,
-        limit=limit
+    # Return streaming response with SSE headers
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering for nginx
+        }
     )
