@@ -196,13 +196,27 @@ async def _search_contracts(search_request: SearchRequest) -> List[Dict[str, Any
             
             logger.info(f"Found {total_found} contracts, processing {len(contracts)}")
             
-            # Update total found in database
+            # Update total found and store parser HTML in debug_data
             with db_manager.get_session() as db_session:
                 search_request_db = db_session.query(SearchRequest).filter(
                     SearchRequest.id == search_request.id
                 ).first()
                 if search_request_db:
                     search_request_db.found_total = total_found
+                    
+                    # Store parser HTML in debug_data
+                    if not search_request_db.debug_data:
+                        search_request_db.debug_data = {}
+                    
+                    search_request_db.debug_data["parser"] = {
+                        "search_url": search_url,
+                        "html_sample": html[:5000] if html else None,  # Store first 5000 chars
+                        "html_length": len(html) if html else 0,
+                        "parsed_contracts_count": len(contracts),
+                        "total_found": total_found,
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
                     db_session.commit()
             
             return contracts

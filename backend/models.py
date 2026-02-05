@@ -72,6 +72,7 @@ class SearchRequest(Base):
         selected_contract_ids: List of contract IDs selected for NMCK calculation
         runtime_ms: Search execution time in milliseconds
         error_message: Error message if search failed
+        debug_data: Debug information including parser HTML and other diagnostics
     """
     __tablename__ = "search_request"
     
@@ -121,6 +122,9 @@ class SearchRequest(Base):
     # Performance and error tracking
     runtime_ms: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    
+    # Debug data
+    debug_data: Mapped[Dict[str, Any]] = mapped_column(JSON, default=dict, nullable=False)
     
     # Relationships
     contract_results: Mapped[List["ContractResult"]] = relationship(
