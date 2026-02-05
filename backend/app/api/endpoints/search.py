@@ -17,35 +17,142 @@ from ...worker.tasks import process_search
 router = APIRouter()
 
 
-class SearchRequest(BaseModel):
-    """Search request model."""
+# Pydantic schemas
+class SearchRequestCreate(BaseModel):
+    """Search request creation model."""
     object_name: str = Field(..., description="Name of the procurement object")
     ktru_code: str = Field(..., description="KTRU code")
     okpd2_code: Optional[str] = Field(None, description="OKPD2 code")
     customer_region: str = Field("СЗФО", description="Customer region")
     law: str = Field("44-ФЗ", description="Procurement law")
-    date_from: datetime = Field(..., description="Start date for search")
-    date_to: datetime = Field(..., description="End date for search")
-    execution_statuses: List[str] = Field(["Исполнение завершено"], description="Execution statuses")
-    limit_contracts: int = Field(30, description="Maximum number of contracts to process")
-    characteristics_text: Optional[str] = Field(None, description="Text description of characteristics")
-    manufacturer: Optional[str] = Field(None, description="Target manufacturer")
+    date_from: date = Field(..., description="Start date for search")
+    date_to: date = Field(..., description="End date for search")
+    execution_statuses: List[str] = Field(
+        ["Исполнение завершено", "Исполнение прекращено"], 
+        description="Execution statuses"
+    )
+    limit_contracts: int = Field(30, ge=1, le=1000, description="Maximum number of contracts to process")
+    input_source: InputSource = Field(InputSource.MANUAL, description="Source of input data")
+    
+    @validator('date_to')
+    def validate_dates(cls, v, values):
+        if 'date_from' in values and v < values['date_from']:
+            raise ValueError('date_to must be after date_from')
+        return v
 
 
 class SearchResponse(BaseModel):
     """Search response model."""
     id: UUID
-    status: str
+    status: SearchStatus
     created_at: datetime
     object_name: str
     ktru_code: str
+    okpd2_code: Optional[str]
+    customer_region: str
+    law: str
+    date_from: datetime
+    date_to: datetime
+    execution_statuses: List[str]
+    limit_contracts: int
+    input_source: InputSource
     found_total: Optional[int] = None
     processed_count: int = 0
     nmc_value: Optional[float] = None
+    selected_contract_ids: List[str] = []
+    runtime_ms: Optional[int] = None
+    error_message: Optional[str] = None
+
+
+class ContractResultResponse(BaseModel):
+    """Contract result response model."""
+    id: UUID
+    search_id: UUID
+    reestr_number: str
+    contract_url: str
+    sign_date: datetime
+    unit_price: Optional[float]
+    currency: str
+    match_type: str
+    ai_score: int
+    manufacturer_target: Optional[str]
+    manufacturer_found: Optional[str]
+    manufacturer_match: Optional[bool]
+    is_2025_plus: bool
+    accepted_for_nmc: bool
+    raw_data_json: Dict[str, Any]
+    created_at: datetime
+
+
+class SearchResultsResponse(BaseModel):
+    """Search results response model."""
+    search_id: UUID
+    results: List[ContractResultResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class SearchHistoryResponse(BaseModel):
+    """Search history response model."""
+    searches: List[SearchResponse]
+    total: int
+    page: int
+    limit: int
+
+
+class StopSearchResponse(BaseModel):
+    """Stop search response model."""
+    message: str
+    search_id: UUID
+    status: SearchStatus
+
+
+# Background task function using Celery worker
+def process_search_background(search_id: str, db: Session):
+    """
+    Background task to process search request using Celery worker.
+    
+    Args:
+        search_id: ID of the search request
+        db: Database session
+    """
+    try:
+        # Import Celery app and task
+        from backend.celery_app import celery_app
+        from backend.services.worker.tasks import process_search_task
+        
+        # Send task to Celery worker
+        task_result = process_search_task.delay(search_id)
+        
+        # Store task ID in search request for future reference
+        search = db.query(SearchRequestModel).filter(SearchRequestModel.id == search_id).first()
+        if search:
+            # Store task ID in raw_data_json or create a new field
+            if not search.raw_data_json:
+                search.raw_data_json = {}
+            search.raw_data_json["celery_task_id"] = task_result.id
+            db.commit()
+            
+    except Exception as e:
+        # Log error and update search status
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to start background task for search {search_id}: {e}")
+        
+        search = db.query(SearchRequestModel).filter(SearchRequestModel.id == search_id).first()
+        if search:
+            search.status = SearchStatus.ERROR
+            search.error_message = f"Failed to start background task: {str(e)}"
+            db.commit()
 
 
 @router.post("/", response_model=SearchResponse)
-async def create_search(request: SearchRequest, background_tasks: BackgroundTasks):
+async def create_search(
+    request: SearchRequestCreate, 
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db)
+):
     """
     Create a new search for contracts.
     
@@ -86,63 +193,148 @@ async def create_search(request: SearchRequest, background_tasks: BackgroundTask
         created_at=datetime.now(),
         object_name=request.object_name,
         ktru_code=request.ktru_code,
-        found_total=0,
-        processed_count=0,
-        nmc_value=None
+        okpd2_code=request.okpd2_code,
+        customer_region=request.customer_region,
+        law=request.law,
+        date_from=datetime.combine(request.date_from, datetime.min.time()),
+        date_to=datetime.combine(request.date_to, datetime.max.time()),
+        execution_statuses=request.execution_statuses,
+        limit_contracts=request.limit_contracts,
+        input_source=request.input_source,
+        status=SearchStatus.RUNNING
+    )
+    
+    db.add(search_request)
+    db.commit()
+    db.refresh(search_request)
+    
+    # Add background task
+    background_tasks.add_task(process_search_background, search_request.id, db)
+    
+    # Convert to response model
+    return SearchResponse(
+        id=UUID(search_request.id),
+        status=search_request.status,
+        created_at=search_request.created_at,
+        object_name=search_request.object_name,
+        ktru_code=search_request.ktru_code,
+        okpd2_code=search_request.okpd2_code,
+        customer_region=search_request.customer_region,
+        law=search_request.law,
+        date_from=search_request.date_from,
+        date_to=search_request.date_to,
+        execution_statuses=search_request.execution_statuses,
+        limit_contracts=search_request.limit_contracts,
+        input_source=search_request.input_source,
+        found_total=search_request.found_total,
+        processed_count=search_request.processed_count,
+        nmc_value=search_request.nmc_value,
+        selected_contract_ids=search_request.selected_contract_ids,
+        runtime_ms=search_request.runtime_ms,
+        error_message=search_request.error_message
     )
 
 
-@router.get("/", response_model=List[SearchResponse])
-async def list_searches(
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
-):
-    """
-    List all search requests.
-    """
-    # TODO: Implement actual listing logic
-    return []
-
-
 @router.get("/{search_id}", response_model=SearchResponse)
-async def get_search(search_id: UUID):
+async def get_search(
+    search_id: UUID,
+    db: Session = Depends(get_db)
+):
     """
     Get details of a specific search.
     """
-    # TODO: Implement actual retrieval logic
-    raise HTTPException(status_code=404, detail="Search not found")
+    search_request = db.query(SearchRequestModel).filter(SearchRequestModel.id == str(search_id)).first()
+    
+    if not search_request:
+        raise HTTPException(status_code=404, detail="Search not found")
+    
+    return SearchResponse(
+        id=UUID(search_request.id),
+        status=search_request.status,
+        created_at=search_request.created_at,
+        object_name=search_request.object_name,
+        ktru_code=search_request.ktru_code,
+        okpd2_code=search_request.okpd2_code,
+        customer_region=search_request.customer_region,
+        law=search_request.law,
+        date_from=search_request.date_from,
+        date_to=search_request.date_to,
+        execution_statuses=search_request.execution_statuses,
+        limit_contracts=search_request.limit_contracts,
+        input_source=search_request.input_source,
+        found_total=search_request.found_total,
+        processed_count=search_request.processed_count,
+        nmc_value=search_request.nmc_value,
+        selected_contract_ids=search_request.selected_contract_ids,
+        runtime_ms=search_request.runtime_ms,
+        error_message=search_request.error_message
+    )
 
 
-@router.post("/{search_id}/stop")
-async def stop_search(search_id: UUID):
-    """
-    Stop a running search.
-    """
-    # TODO: Implement actual stop logic
-    return {"message": f"Search {search_id} stopped successfully"}
-
-
-@router.get("/{search_id}/results")
+@router.get("/{search_id}/results", response_model=SearchResultsResponse)
 async def get_search_results(
     search_id: UUID,
-    skip: int = Query(0, ge=0),
-    limit: int = Query(100, ge=1, le=1000),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(100, ge=1, le=1000, description="Maximum number of records to return"),
+    db: Session = Depends(get_db)
 ):
     """
     Get results of a specific search.
     """
-    # TODO: Implement actual results retrieval
-    return {
-        "search_id": search_id,
-        "results": [],
-        "total": 0
-    }
+    # Check if search exists
+    search_request = db.query(SearchRequestModel).filter(SearchRequestModel.id == str(search_id)).first()
+    if not search_request:
+        raise HTTPException(status_code=404, detail="Search not found")
+    
+    # Get total count
+    total = db.query(ContractResultModel).filter(ContractResultModel.search_id == str(search_id)).count()
+    
+    # Get paginated results
+    results = db.query(ContractResultModel)\
+        .filter(ContractResultModel.search_id == str(search_id))\
+        .order_by(desc(ContractResultModel.created_at))\
+        .offset(skip)\
+        .limit(limit)\
+        .all()
+    
+    # Convert to response models
+    result_responses = []
+    for result in results:
+        result_responses.append(ContractResultResponse(
+            id=UUID(result.id),
+            search_id=UUID(result.search_id),
+            reestr_number=result.reestr_number,
+            contract_url=result.contract_url,
+            sign_date=result.sign_date,
+            unit_price=result.unit_price,
+            currency=result.currency,
+            match_type=result.match_type.value,
+            ai_score=result.ai_score,
+            manufacturer_target=result.manufacturer_target,
+            manufacturer_found=result.manufacturer_found,
+            manufacturer_match=result.manufacturer_match,
+            is_2025_plus=result.is_2025_plus,
+            accepted_for_nmc=result.accepted_for_nmc,
+            raw_data_json=result.raw_data_json,
+            created_at=result.created_at
+        ))
+    
+    return SearchResultsResponse(
+        search_id=search_id,
+        results=result_responses,
+        total=total,
+        page=skip // limit + 1 if limit > 0 else 1,
+        limit=limit
+    )
 
 
-@router.get("/{search_id}/report")
-async def download_report(search_id: UUID):
+@router.post("/{search_id}/stop", response_model=StopSearchResponse)
+async def stop_search(
+    search_id: UUID,
+    db: Session = Depends(get_db)
+):
     """
-    Download a report for a specific search.
+    Stop a running search.
     """
     # TODO: Implement report generation
     raise HTTPException(status_code=404, detail="Report not available")
@@ -181,22 +373,23 @@ async def stream_search_events(search_id: UUID):
         try:
             # Subscribe to events for this search
             async for event_data in event_channel.subscribe(search_id):
-                # Parse the event data
-                event_dict = json.loads(event_data)
+                # The event_data should already be a JSON string from event_channel
+                # Parse it to extract event type for SSE formatting
+                try:
+                    event_dict = json.loads(event_data)
+                    event_type = event_dict.get("type", "message")
+                    
+                    # Format as SSE
+                    yield f"event: {event_type}\n"
+                    yield f"data: {event_data}\n\n"
+                    
+                except json.JSONDecodeError:
+                    # If event_data is not valid JSON, send it as a message event
+                    yield f"event: message\n"
+                    yield f"data: {json.dumps({'message': event_data})}\n\n"
                 
-                # Convert to SSE format
-                # Note: In a real implementation, we would reconstruct the event object
-                # from the JSON and use event_to_sse_format. For simplicity, we'll
-                # send the raw JSON with appropriate SSE formatting.
-                
-                # Determine event type from the data
-                event_type = event_dict.get("type", "message")
-                
-                # Format as SSE
-                yield f"event: {event_type}\n"
-                yield f"data: {event_data}\n\n"
-                
-                # Keep connection alive
+                # Keep connection alive with periodic ping
+                # This helps prevent connection timeouts
                 await asyncio.sleep(0.1)
                 
         except asyncio.CancelledError:
@@ -221,5 +414,6 @@ async def stream_search_events(search_id: UUID):
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
             "X-Accel-Buffering": "no",  # Disable buffering for nginx
+            "Access-Control-Allow-Origin": "*",  # Allow CORS for SSE
         }
     )

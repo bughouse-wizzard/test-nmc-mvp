@@ -73,8 +73,8 @@ def event_to_sse_format(event: Event) -> str:
     Returns:
         Formatted SSE string
     """
-    event_dict = event.model_dump()
-    event_type = event_dict.pop("type")
+    # Get the string value of the event type enum
+    event_type = event.type.value
     
     # Format as SSE
     lines = [
