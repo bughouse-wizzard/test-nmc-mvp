@@ -4,8 +4,15 @@ Search endpoints for contract search and NMCK calculation.
 from typing import List, Optional
 from uuid import UUID
 from fastapi import APIRouter, BackgroundTasks, HTTPException, Query
+from fastapi.responses import StreamingResponse
+import asyncio
+import json
 from pydantic import BaseModel, Field
 from datetime import datetime
+
+from ...core.event_channel import event_channel
+from ...core.events import event_to_sse_format
+from ...worker.tasks import process_search
 
 router = APIRouter()
 
@@ -43,15 +50,38 @@ async def create_search(request: SearchRequest, background_tasks: BackgroundTask
     Create a new search for contracts.
     
     This endpoint initiates a search for contracts based on the provided criteria.
-    The search runs in the background.
+    The search runs in the background using Celery.
     """
-    # TODO: Implement actual search logic
-    # For now, return a mock response
     from uuid import uuid4
     from datetime import datetime
     
+    # Generate search ID
+    search_id = uuid4()
+    
+    # Initialize event channel
+    await event_channel.initialize()
+    
+    # Start background task
+    try:
+        process_search.delay(str(search_id))
+    except Exception as e:
+        # If Celery fails, we can still return the search ID
+        # The frontend will connect to SSE but won't get updates
+        print(f"Warning: Failed to start Celery task: {e}")
+        # Send an immediate error event
+        from ...core.events import ErrorEvent
+        error_event = ErrorEvent(
+            search_id=str(search_id),
+            error_message=f"Failed to start background worker: {str(e)}",
+            error_type="worker_error"
+        )
+        await event_channel.publish(str(search_id), error_event)
+    
+    # TODO: Save search request to database
+    # For now, return response with search ID
+    
     return SearchResponse(
-        id=uuid4(),
+        id=search_id,
         status="RUNNING",
         created_at=datetime.now(),
         object_name=request.object_name,
@@ -116,3 +146,80 @@ async def download_report(search_id: UUID):
     """
     # TODO: Implement report generation
     raise HTTPException(status_code=404, detail="Report not available")
+
+
+@router.get("/{search_id}/events")
+async def stream_search_events(search_id: UUID):
+    """
+    Stream Server-Sent Events (SSE) for a specific search.
+    
+    This endpoint provides real-time updates about search progress,
+    including:
+    - progress: processed count and total found
+    - result_added: new contract found and analyzed
+    - done: search completed
+    - error: error occurred during processing
+    
+    The stream follows the SSE format:
+    event: <event_type>
+    data: <json_data>
+    
+    Example events:
+    event: progress
+    data: {"type": "progress", "search_id": "...", "processed_count": 5, "found_total": 25, ...}
+    
+    event: result_added
+    data: {"type": "result_added", "search_id": "...", "contract_id": "...", ...}
+    """
+    # Initialize event channel
+    await event_channel.initialize()
+    
+    async def event_generator():
+        """
+        Generator function that yields SSE-formatted events.
+        """
+        try:
+            # Subscribe to events for this search
+            async for event_data in event_channel.subscribe(search_id):
+                # Parse the event data
+                event_dict = json.loads(event_data)
+                
+                # Convert to SSE format
+                # Note: In a real implementation, we would reconstruct the event object
+                # from the JSON and use event_to_sse_format. For simplicity, we'll
+                # send the raw JSON with appropriate SSE formatting.
+                
+                # Determine event type from the data
+                event_type = event_dict.get("type", "message")
+                
+                # Format as SSE
+                yield f"event: {event_type}\n"
+                yield f"data: {event_data}\n\n"
+                
+                # Keep connection alive
+                await asyncio.sleep(0.1)
+                
+        except asyncio.CancelledError:
+            # Client disconnected
+            print(f"Client disconnected from SSE stream for search {search_id}")
+        except Exception as e:
+            # Send error as SSE event
+            error_event = {
+                "type": "error",
+                "search_id": str(search_id),
+                "error_message": f"Error in event stream: {str(e)}",
+                "timestamp": datetime.now().isoformat()
+            }
+            yield f"event: error\n"
+            yield f"data: {json.dumps(error_event)}\n\n"
+    
+    # Return streaming response with SSE headers
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",  # Disable buffering for nginx
+        }
+    )

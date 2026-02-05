@@ -390,6 +390,7 @@
         
         let searchIntervals = {}; 
         let activeSidebarSearchId = null;
+        let sseConnections = {}; // Store SSE connections by search ID
 
         document.addEventListener('DOMContentLoaded', () => {
             initMockHistory(); // Generate dummy data to show pagination
@@ -444,7 +445,7 @@
             }
         }
 
-        function startSearch(e) {
+        async function startSearch(e) {
             e.preventDefault();
             
             const nameInput = document.getElementById('obj-name-input').value;
@@ -468,41 +469,207 @@
             document.getElementById('progress-panel').classList.remove('hidden');
             showToast('Поиск запущен...', 'info');
 
-            const tempId = Date.now();
-            activeSidebarSearchId = tempId;
-
-            const newHistoryItem = { 
-                id: tempId, 
-                date: new Date().toISOString().split('T')[0], 
-                name: searchName,
-                ktru: document.getElementById('ktru-input').value || "---",
-                status: "В работе", 
-                found: 0, 
-                avg: 0,
-                targetMfr: document.getElementById('mfr-input').value, 
-                type: type,
-                limit: limitVal, 
-                specsText: specsText 
-            };
-            
-            MOCK_HISTORY.unshift(newHistoryItem);
-            currentHistoryPage = 1; // Reset to page 1 on new search
-            renderHistory();
-
-            let progress = 0;
-            searchIntervals[tempId] = setInterval(() => {
-                progress += Math.random() * 3; 
-                const count = Math.min(limitVal, Math.floor((progress / 100) * limitVal));
+            try {
+                // Create search request via API
+                const today = new Date();
+                const oneYearAgo = new Date();
+                oneYearAgo.setFullYear(today.getFullYear() - 1);
                 
-                if(activeSidebarSearchId === tempId) {
-                    document.getElementById('proc-bar').style.width = `${Math.min(100, progress)}%`;
-                    document.getElementById('proc-count').innerText = `${count}/${limitVal}`;
+                const searchData = {
+                    object_name: searchName,
+                    ktru_code: document.getElementById('ktru-input').value || "---",
+                    okpd2_code: null,
+                    customer_region: "СЗФО",
+                    law: "44-ФЗ",
+                    date_from: oneYearAgo.toISOString(),
+                    date_to: today.toISOString(),
+                    execution_statuses: ["Исполнение завершено"],
+                    limit_contracts: limitVal,
+                    characteristics_text: specsText,
+                    manufacturer: document.getElementById('mfr-input').value || null
+                };
+
+                const response = await fetch('/api/search/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(searchData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                if(progress >= 100) {
-                    finishSearch(tempId, limitVal);
+                const searchResponse = await response.json();
+                const searchId = searchResponse.id;
+                
+                activeSidebarSearchId = searchId;
+
+                const newHistoryItem = { 
+                    id: searchId, 
+                    date: new Date().toISOString().split('T')[0], 
+                    name: searchName,
+                    ktru: document.getElementById('ktru-input').value || "---",
+                    status: "В работе", 
+                    found: 0, 
+                    avg: 0,
+                    targetMfr: document.getElementById('mfr-input').value, 
+                    type: type,
+                    limit: limitVal, 
+                    specsText: specsText 
+                };
+                
+                MOCK_HISTORY.unshift(newHistoryItem);
+                currentHistoryPage = 1; // Reset to page 1 on new search
+                renderHistory();
+
+                // Start SSE connection for real-time updates
+                startSSEConnection(searchId);
+
+            } catch (error) {
+                console.error('Error starting search:', error);
+                showToast('Ошибка при запуске поиска', 'error');
+                resetSidebarUI();
+            }
+        }
+
+        function startSSEConnection(searchId) {
+            // Close existing connection if any
+            if (sseConnections[searchId]) {
+                sseConnections[searchId].close();
+            }
+
+            // Create new SSE connection
+            const eventSource = new EventSource(`/api/search/${searchId}/events`);
+            
+            eventSource.onopen = () => {
+                console.log(`SSE connection opened for search ${searchId}`);
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing SSE event:', error, event.data);
                 }
-            }, 300);
+            };
+
+            eventSource.addEventListener('progress', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing progress event:', error);
+                }
+            });
+
+            eventSource.addEventListener('result_added', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing result_added event:', error);
+                }
+            });
+
+            eventSource.addEventListener('done', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing done event:', error);
+                }
+            });
+
+            eventSource.addEventListener('error', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing error event:', error);
+                }
+            });
+
+            eventSource.onerror = (error) => {
+                console.error(`SSE connection error for search ${searchId}:`, error);
+                // Try to reconnect after 5 seconds
+                setTimeout(() => {
+                    if (activeSidebarSearchId === searchId) {
+                        console.log(`Reconnecting SSE for search ${searchId}...`);
+                        startSSEConnection(searchId);
+                    }
+                }, 5000);
+            };
+
+            // Store the connection
+            sseConnections[searchId] = eventSource;
+        }
+
+        function handleSSEEvent(searchId, eventData) {
+            console.log(`SSE event for search ${searchId}:`, eventData);
+            
+            // Update UI based on event type
+            switch (eventData.type) {
+                case 'progress':
+                    updateSearchProgress(searchId, eventData);
+                    break;
+                case 'result_added':
+                    addSearchResult(searchId, eventData);
+                    break;
+                case 'done':
+                    finishSearch(searchId, eventData);
+                    break;
+                case 'error':
+                    handleSearchError(searchId, eventData);
+                    break;
+            }
+        }
+
+        function updateSearchProgress(searchId, progressData) {
+            // Update progress bar in sidebar if this is the active search
+            if (activeSidebarSearchId === searchId) {
+                const progressPercent = (progressData.processed_count / progressData.found_total) * 100;
+                document.getElementById('proc-bar').style.width = `${Math.min(100, progressPercent)}%`;
+                document.getElementById('proc-count').innerText = `${progressData.processed_count}/${progressData.found_total}`;
+            }
+
+            // Update history item
+            const historyItem = MOCK_HISTORY.find(item => item.id === searchId);
+            if (historyItem) {
+                historyItem.found = progressData.found_total;
+                historyItem.status = progressData.status || "В работе";
+                renderHistory();
+            }
+        }
+
+        function addSearchResult(searchId, resultData) {
+            // Here you would add the result to the results table
+            // For now, just log it
+            console.log('New contract result:', resultData);
+            
+            // Update badge to show new results
+            document.getElementById('badge-new').classList.remove('hidden');
+        }
+
+        function handleSearchError(searchId, errorData) {
+            console.error(`Search error for ${searchId}:`, errorData);
+            
+            // Update history item
+            const historyItem = MOCK_HISTORY.find(item => item.id === searchId);
+            if (historyItem) {
+                historyItem.status = "Ошибка";
+                renderHistory();
+            }
+
+            // Show error toast
+            showToast(`Ошибка поиска: ${errorData.error_message}`, 'error');
+            
+            // Reset sidebar UI if this is the active search
+            if (activeSidebarSearchId === searchId) {
+                resetSidebarUI();
+            }
         }
 
         function stopActiveSearch() {
@@ -510,9 +677,16 @@
         }
 
         function stopSearch(id) {
+            // Clear any mock intervals
             if(searchIntervals[id]) {
                 clearInterval(searchIntervals[id]);
                 delete searchIntervals[id];
+            }
+
+            // Close SSE connection
+            if(sseConnections[id]) {
+                sseConnections[id].close();
+                delete sseConnections[id];
             }
 
             const item = MOCK_HISTORY.find(i => i.id === id);
@@ -526,28 +700,58 @@
             }
         }
 
-        function finishSearch(id, limitVal) {
-            if(searchIntervals[id]) {
-                clearInterval(searchIntervals[id]);
-                delete searchIntervals[id];
-            }
+        function finishSearch(id, eventData) {
+            // Handle both mock data (limitVal) and real SSE data (eventData)
+            if (typeof eventData === 'number') {
+                // Old mock behavior
+                const limitVal = eventData;
+                if(searchIntervals[id]) {
+                    clearInterval(searchIntervals[id]);
+                    delete searchIntervals[id];
+                }
 
-            const item = MOCK_HISTORY.find(i => i.id === id);
-            if(item) {
-                item.status = "Завершен";
-                const baseFound = Math.floor(limitVal * 0.9);
-                item.found = Math.max(1, baseFound + Math.floor(Math.random() * (limitVal * 0.2)));
-            }
+                const item = MOCK_HISTORY.find(i => i.id === id);
+                if(item) {
+                    item.status = "Завершен";
+                    const baseFound = Math.floor(limitVal * 0.9);
+                    item.found = Math.max(1, baseFound + Math.floor(Math.random() * (limitVal * 0.2)));
+                }
 
-            if(activeSidebarSearchId === id) {
-                resetSidebarUI();
-            }
+                if(activeSidebarSearchId === id) {
+                    resetSidebarUI();
+                }
 
-            showToast(`Поиск завершен. Найдено ${item.found}`, 'success');
-            document.getElementById('badge-new').classList.remove('hidden');
-            renderHistory();
-            // Optional: Auto load results not annoying user
-            // loadResults(item); 
+                showToast(`Поиск завершен. Найдено ${item.found}`, 'success');
+                document.getElementById('badge-new').classList.remove('hidden');
+                renderHistory();
+            } else {
+                // Real SSE event data
+                const item = MOCK_HISTORY.find(i => i.id === id);
+                if(item) {
+                    item.status = "Завершен";
+                    item.found = eventData.total_found || eventData.total_processed || 0;
+                    
+                    // Update NMCK value if available
+                    if (eventData.nmc_value) {
+                        // You could store this for display in results view
+                        console.log(`NMCK value calculated: ${eventData.nmc_value}`);
+                    }
+                }
+
+                if(activeSidebarSearchId === id) {
+                    resetSidebarUI();
+                }
+
+                showToast(`Поиск завершен. Найдено ${item.found} контрактов`, 'success');
+                document.getElementById('badge-new').classList.remove('hidden');
+                renderHistory();
+                
+                // Close SSE connection
+                if(sseConnections[id]) {
+                    sseConnections[id].close();
+                    delete sseConnections[id];
+                }
+            }
         }
 
         function resetSidebarUI() {
