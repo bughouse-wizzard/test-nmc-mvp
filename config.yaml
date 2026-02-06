@@ -1,0 +1,143 @@
+# DeepSeek AI Configuration
+# This file contains configuration for DeepSeek AI client
+
+deepseek:
+  # API Configuration
+  api_key: ${DEEPSEEK_API_KEY}  # Will be loaded from environment variable
+  base_url: "https://api.deepseek.com"
+  model: "deepseek-chat"
+  
+  # Model Parameters
+  temperature: 0.1  # Low temperature for more deterministic outputs
+  max_tokens: 4000  # Maximum tokens in response
+  top_p: 0.95
+  frequency_penalty: 0.0
+  presence_penalty: 0.0
+  
+  # Request Settings
+  timeout: 30  # seconds
+  max_retries: 3
+  retry_delay: 2  # seconds between retries
+  
+  # Response Format
+  response_format:
+    type: "json_object"  # Ensure JSON responses
+
+# Prompt Templates Configuration
+prompts:
+  extract_specs_from_tz:
+    system_prompt: |
+      You are a technical specification extraction expert. Your task is to analyze raw text or file content and extract structured technical specifications in JSON format.
+      
+      Extract the following information:
+      1. Product/service name
+      2. Technical parameters with their values and units
+      3. Quantity requirements
+      4. Quality standards or certifications
+      5. Delivery requirements
+      6. Any special conditions or notes
+      
+      Return the result as a valid JSON object with the structure:
+      {
+        "items": [
+          {
+            "name": "string",
+            "parameters": [
+              {
+                "name": "string",
+                "value": "string|number",
+                "unit": "string"
+              }
+            ],
+            "quantity": "string|number",
+            "quality_standards": ["string"],
+            "delivery_requirements": "string",
+            "notes": "string"
+          }
+        ]
+      }
+  
+  extract_specs_from_contract_doc:
+    system_prompt: |
+      You are a contract document analysis expert. Your task is to analyze parsed PDF/DOCX text from contract documents and extract structured technical specifications in JSON format.
+      
+      Extract the following information:
+      1. Contract item/product name
+      2. Technical specifications and requirements
+      3. Quantity and unit of measurement
+      4. Quality requirements and standards
+      5. Delivery schedule and terms
+      6. Price information (if available)
+      7. Contract-specific conditions
+      
+      Return the result as a valid JSON object with the structure:
+      {
+        "contract_items": [
+          {
+            "item_name": "string",
+            "description": "string",
+            "technical_specs": [
+              {
+                "parameter": "string",
+                "requirement": "string",
+                "unit": "string"
+              }
+            ],
+            "quantity": "string|number",
+            "unit_of_measurement": "string",
+            "quality_requirements": ["string"],
+            "delivery_schedule": "string",
+            "price": "string|number",
+            "currency": "string",
+            "contract_conditions": ["string"]
+          }
+        ]
+      }
+  
+  compare_specs_and_score:
+    system_prompt: |
+      You are a technical specification comparison expert. Your task is to compare target specifications with actual specifications and calculate a match score from 0-100.
+      
+      Compare the following:
+      1. Technical parameter matches
+      2. Quantity requirements
+      3. Quality standards compliance
+      4. Delivery requirements alignment
+      
+      Determine the match type:
+      - Identical: All requirements match exactly
+      - Homogeneous: Requirements are functionally equivalent or within acceptable tolerance
+      - Partial: Some requirements match but significant differences exist
+      - Mismatch: Major differences or incompatible requirements
+      
+      Return the result as a valid JSON object with the structure:
+      {
+        "score": 0-100,
+        "match_type": "Identical|Homogeneous|Partial|Mismatch",
+        "details": {
+          "parameter_matches": [
+            {
+              "parameter": "string",
+              "target_value": "string|number",
+              "actual_value": "string|number",
+              "match": true|false,
+              "notes": "string"
+            }
+          ],
+          "quantity_match": true|false,
+          "quality_standards_match": true|false,
+          "delivery_match": true|false
+        },
+        "summary": "string"
+      }
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  
+# Validation Settings
+validation:
+  require_json: true
+  max_response_size: 10000  # characters
+  timeout_validation: true

@@ -6,63 +6,7 @@
     <title>Поиск НМЦК - ЕИС Госзакупки</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    
-    <style>
-        body { font-family: 'Inter', system-ui, -apple-system, sans-serif; background-color: #f3f4f6; color: #1f2937; }
-        
-        /* Скроллбары */
-        .table-container::-webkit-scrollbar { height: 8px; width: 8px; }
-        .table-container::-webkit-scrollbar-thumb { background-color: #cbd5e1; border-radius: 4px; }
-        .table-container::-webkit-scrollbar-track { background-color: #f1f5f9; }
-        .sidebar-scroll::-webkit-scrollbar { width: 4px; }
-        .sidebar-scroll::-webkit-scrollbar-thumb { background-color: #d1d5db; border-radius: 2px; }
-
-        /* Таблица */
-        .clickable-row { cursor: pointer; transition: background-color 0.15s ease; }
-        .clickable-row:hover { background-color: #eff6ff; }
-        
-        /* Фильтры */
-        .th-filter-wrapper { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
-        .th-input { 
-            font-size: 0.75rem; padding: 5px 8px; border: 1px solid #d1d5db; 
-            border-radius: 6px; width: 100%; outline: none; transition: all 0.2s; background-color: #fff;
-        }
-        .th-input:focus { border-color: #3b82f6; box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1); }
-
-        /* Анимации */
-        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
-        .animate-fade-in { animation: fadeIn 0.3s ease-out forwards; }
-        
-        /* Модальные окна */
-        .modal-backdrop {
-            position: fixed; inset: 0; background-color: rgba(0,0,0,0.5); 
-            backdrop-filter: blur(2px); z-index: 50; display: none;
-            align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;
-        }
-        .modal-backdrop.open { display: flex; opacity: 1; }
-        .modal-content {
-            background: white; border-radius: 12px; max-width: 800px; width: 95%; 
-            max-height: 90vh; display: flex; flex-direction: column;
-            box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.1);
-            transform: scale(0.95); transition: transform 0.2s;
-        }
-        .modal-backdrop.open .modal-content { transform: scale(1); }
-
-        /* Уведомления */
-        #notification-area { position: fixed; bottom: 20px; right: 20px; z-index: 100; display: flex; flex-direction: column; gap: 10px; }
-        .toast { 
-            background: white; padding: 12px 16px; border-radius: 8px; 
-            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1); 
-            border-left: 4px solid #3b82f6; display: flex; align-items: center; gap: 12px;
-            transform: translateX(120%); transition: transform 0.3s ease-out; min-width: 300px;
-        }
-        .toast.show { transform: translateX(0); }
-
-        /* Вкладки */
-        .tab-btn { color: #6b7280; font-weight: 500; padding: 8px 16px; border-bottom: 2px solid transparent; transition: all 0.2s; }
-        .tab-btn:hover { color: #1f2937; background-color: #f9fafb; border-radius: 6px 6px 0 0; }
-        .tab-btn.active { color: #2563eb; border-bottom-color: #2563eb; font-weight: 600; }
-    </style>
+    <link rel="stylesheet" href="style.css">
 </head>
 <body class="h-screen flex flex-col overflow-hidden">
 
@@ -390,14 +334,58 @@
         
         let searchIntervals = {}; 
         let activeSidebarSearchId = null;
+        let sseConnections = {}; // Store SSE connections by search ID
 
         document.addEventListener('DOMContentLoaded', () => {
-            initMockHistory(); // Generate dummy data to show pagination
-            renderHistory();
+            loadHistory(); // Load real history from API
             document.getElementById('results-footer').classList.add('translate-y-full'); 
         });
 
-        // Generate some history data so pagination is visible
+        // Load history from API
+        async function loadHistory() {
+            try {
+                const response = await fetch('/api/search/history');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Convert API response to MOCK_HISTORY format for compatibility
+                MOCK_HISTORY = data.searches.map(search => ({
+                    id: search.id,
+                    date: new Date(search.created_at).toISOString().split('T')[0],
+                    name: search.object_name,
+                    ktru: search.ktru_code,
+                    status: mapSearchStatus(search.status),
+                    found: search.found_total || 0,
+                    avg: search.nmc_value || 0,
+                    type: detectType(search.object_name),
+                    targetMfr: search.manufacturer || null,
+                    searchData: search // Store full search data for reference
+                }));
+                
+                renderHistory();
+            } catch (error) {
+                console.error('Error loading history:', error);
+                // Fallback to mock data if API fails
+                initMockHistory();
+                renderHistory();
+                showToast('Не удалось загрузить историю поисков', 'error');
+            }
+        }
+
+        // Map backend status to frontend status
+        function mapSearchStatus(backendStatus) {
+            const statusMap = {
+                'RUNNING': 'В работе',
+                'COMPLETED': 'Завершен',
+                'STOPPED': 'Остановлен',
+                'ERROR': 'Ошибка'
+            };
+            return statusMap[backendStatus] || backendStatus;
+        }
+
+        // Generate some history data so pagination is visible (fallback)
         function initMockHistory() {
             MOCK_HISTORY = [
                 { id: 101, date: "2026-01-21", name: "Бумага офисная A4", ktru: "17.12.14.110", status: "Завершен", found: 45, avg: 420.50, type: "paper" },
@@ -444,7 +432,7 @@
             }
         }
 
-        function startSearch(e) {
+        async function startSearch(e) {
             e.preventDefault();
             
             const nameInput = document.getElementById('obj-name-input').value;
@@ -468,86 +456,303 @@
             document.getElementById('progress-panel').classList.remove('hidden');
             showToast('Поиск запущен...', 'info');
 
-            const tempId = Date.now();
-            activeSidebarSearchId = tempId;
-
-            const newHistoryItem = { 
-                id: tempId, 
-                date: new Date().toISOString().split('T')[0], 
-                name: searchName,
-                ktru: document.getElementById('ktru-input').value || "---",
-                status: "В работе", 
-                found: 0, 
-                avg: 0,
-                targetMfr: document.getElementById('mfr-input').value, 
-                type: type,
-                limit: limitVal, 
-                specsText: specsText 
-            };
-            
-            MOCK_HISTORY.unshift(newHistoryItem);
-            currentHistoryPage = 1; // Reset to page 1 on new search
-            renderHistory();
-
-            let progress = 0;
-            searchIntervals[tempId] = setInterval(() => {
-                progress += Math.random() * 3; 
-                const count = Math.min(limitVal, Math.floor((progress / 100) * limitVal));
+            try {
+                // Create search request via API
+                const today = new Date();
+                const oneYearAgo = new Date();
+                oneYearAgo.setFullYear(today.getFullYear() - 1);
                 
-                if(activeSidebarSearchId === tempId) {
-                    document.getElementById('proc-bar').style.width = `${Math.min(100, progress)}%`;
-                    document.getElementById('proc-count').innerText = `${count}/${limitVal}`;
+                const searchData = {
+                    object_name: searchName,
+                    ktru_code: document.getElementById('ktru-input').value || "---",
+                    okpd2_code: null,
+                    customer_region: "СЗФО",
+                    law: "44-ФЗ",
+                    date_from: oneYearAgo.toISOString(),
+                    date_to: today.toISOString(),
+                    execution_statuses: ["Исполнение завершено"],
+                    limit_contracts: limitVal,
+                    input_source: "MANUAL",
+                    characteristics_text: specsText,
+                    manufacturer: document.getElementById('mfr-input').value || null
+                };
+
+                const response = await fetch('/api/search/', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(searchData)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
 
-                if(progress >= 100) {
-                    finishSearch(tempId, limitVal);
+                const searchResponse = await response.json();
+                const searchId = searchResponse.id;
+                
+                activeSidebarSearchId = searchId;
+
+                const newHistoryItem = { 
+                    id: searchId, 
+                    date: new Date().toISOString().split('T')[0], 
+                    name: searchName,
+                    ktru: document.getElementById('ktru-input').value || "---",
+                    status: "В работе", 
+                    found: 0, 
+                    avg: 0,
+                    targetMfr: document.getElementById('mfr-input').value, 
+                    type: type,
+                    limit: limitVal, 
+                    specsText: specsText 
+                };
+                
+                MOCK_HISTORY.unshift(newHistoryItem);
+                currentHistoryPage = 1; // Reset to page 1 on new search
+                renderHistory();
+
+                // Start SSE connection for real-time updates
+                startSSEConnection(searchId);
+
+            } catch (error) {
+                console.error('Error starting search:', error);
+                showToast('Ошибка при запуске поиска', 'error');
+                resetSidebarUI();
+            }
+        }
+
+        function startSSEConnection(searchId) {
+            // Close existing connection if any
+            if (sseConnections[searchId]) {
+                sseConnections[searchId].close();
+            }
+
+            // Create new SSE connection
+            const eventSource = new EventSource(`/api/search/${searchId}/events`);
+            
+            eventSource.onopen = () => {
+                console.log(`SSE connection opened for search ${searchId}`);
+            };
+
+            eventSource.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing SSE event:', error, event.data);
                 }
-            }, 300);
+            };
+
+            eventSource.addEventListener('progress', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing progress event:', error);
+                }
+            });
+
+            eventSource.addEventListener('result_added', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing result_added event:', error);
+                }
+            });
+
+            eventSource.addEventListener('done', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing done event:', error);
+                }
+            });
+
+            eventSource.addEventListener('error', (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    handleSSEEvent(searchId, data);
+                } catch (error) {
+                    console.error('Error parsing error event:', error);
+                }
+            });
+
+            eventSource.onerror = (error) => {
+                console.error(`SSE connection error for search ${searchId}:`, error);
+                // Try to reconnect after 5 seconds
+                setTimeout(() => {
+                    if (activeSidebarSearchId === searchId) {
+                        console.log(`Reconnecting SSE for search ${searchId}...`);
+                        startSSEConnection(searchId);
+                    }
+                }, 5000);
+            };
+
+            // Store the connection
+            sseConnections[searchId] = eventSource;
+        }
+
+        function handleSSEEvent(searchId, eventData) {
+            console.log(`SSE event for search ${searchId}:`, eventData);
+            
+            // Update UI based on event type
+            switch (eventData.type) {
+                case 'progress':
+                    updateSearchProgress(searchId, eventData);
+                    break;
+                case 'result_added':
+                    addSearchResult(searchId, eventData);
+                    break;
+                case 'done':
+                    finishSearch(searchId, eventData);
+                    break;
+                case 'error':
+                    handleSearchError(searchId, eventData);
+                    break;
+            }
+        }
+
+        function updateSearchProgress(searchId, progressData) {
+            // Update progress bar in sidebar if this is the active search
+            if (activeSidebarSearchId === searchId) {
+                const progressPercent = (progressData.processed_count / progressData.found_total) * 100;
+                document.getElementById('proc-bar').style.width = `${Math.min(100, progressPercent)}%`;
+                document.getElementById('proc-count').innerText = `${progressData.processed_count}/${progressData.found_total}`;
+            }
+
+            // Update history item
+            const historyItem = MOCK_HISTORY.find(item => item.id === searchId);
+            if (historyItem) {
+                historyItem.found = progressData.found_total;
+                historyItem.status = progressData.status || "В работе";
+                renderHistory();
+            }
+        }
+
+        function addSearchResult(searchId, resultData) {
+            // Here you would add the result to the results table
+            // For now, just log it
+            console.log('New contract result:', resultData);
+            
+            // Update badge to show new results
+            document.getElementById('badge-new').classList.remove('hidden');
+        }
+
+        function handleSearchError(searchId, errorData) {
+            console.error(`Search error for ${searchId}:`, errorData);
+            
+            // Update history item
+            const historyItem = MOCK_HISTORY.find(item => item.id === searchId);
+            if (historyItem) {
+                historyItem.status = "Ошибка";
+                renderHistory();
+            }
+
+            // Show error toast
+            showToast(`Ошибка поиска: ${errorData.error_message}`, 'error');
+            
+            // Reset sidebar UI if this is the active search
+            if (activeSidebarSearchId === searchId) {
+                resetSidebarUI();
+            }
         }
 
         function stopActiveSearch() {
             if(activeSidebarSearchId) stopSearch(activeSidebarSearchId);
         }
 
-        function stopSearch(id) {
-            if(searchIntervals[id]) {
-                clearInterval(searchIntervals[id]);
-                delete searchIntervals[id];
-            }
+        async function stopSearch(id) {
+            try {
+                // Call API to stop search
+                const response = await fetch(`/api/search/${id}/stop`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
 
-            const item = MOCK_HISTORY.find(i => i.id === id);
-            if(item && item.status === "В работе") {
-                item.status = "Остановлен";
-                showToast('Поиск остановлен пользователем', 'error');
-                if(activeSidebarSearchId === id) {
-                    resetSidebarUI();
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
                 }
-                renderHistory();
+
+                const result = await response.json();
+                
+                // Close SSE connection
+                if(sseConnections[id]) {
+                    sseConnections[id].close();
+                    delete sseConnections[id];
+                }
+
+                const item = MOCK_HISTORY.find(i => i.id === id);
+                if(item && item.status === "В работе") {
+                    item.status = "Остановлен";
+                    showToast('Поиск остановлен пользователем', 'error');
+                    if(activeSidebarSearchId === id) {
+                        resetSidebarUI();
+                    }
+                    renderHistory();
+                }
+            } catch (error) {
+                console.error('Error stopping search:', error);
+                showToast('Ошибка при остановке поиска', 'error');
             }
         }
 
-        function finishSearch(id, limitVal) {
-            if(searchIntervals[id]) {
-                clearInterval(searchIntervals[id]);
-                delete searchIntervals[id];
-            }
+        function finishSearch(id, eventData) {
+            // Handle both mock data (limitVal) and real SSE data (eventData)
+            if (typeof eventData === 'number') {
+                // Old mock behavior
+                const limitVal = eventData;
+                if(searchIntervals[id]) {
+                    clearInterval(searchIntervals[id]);
+                    delete searchIntervals[id];
+                }
 
-            const item = MOCK_HISTORY.find(i => i.id === id);
-            if(item) {
-                item.status = "Завершен";
-                const baseFound = Math.floor(limitVal * 0.9);
-                item.found = Math.max(1, baseFound + Math.floor(Math.random() * (limitVal * 0.2)));
-            }
+                const item = MOCK_HISTORY.find(i => i.id === id);
+                if(item) {
+                    item.status = "Завершен";
+                    const baseFound = Math.floor(limitVal * 0.9);
+                    item.found = Math.max(1, baseFound + Math.floor(Math.random() * (limitVal * 0.2)));
+                }
 
-            if(activeSidebarSearchId === id) {
-                resetSidebarUI();
-            }
+                if(activeSidebarSearchId === id) {
+                    resetSidebarUI();
+                }
 
-            showToast(`Поиск завершен. Найдено ${item.found}`, 'success');
-            document.getElementById('badge-new').classList.remove('hidden');
-            renderHistory();
-            // Optional: Auto load results not annoying user
-            // loadResults(item); 
+                showToast(`Поиск завершен. Найдено ${item.found}`, 'success');
+                document.getElementById('badge-new').classList.remove('hidden');
+                renderHistory();
+            } else {
+                // Real SSE event data
+                const item = MOCK_HISTORY.find(i => i.id === id);
+                if(item) {
+                    item.status = "Завершен";
+                    item.found = eventData.total_found || eventData.total_processed || 0;
+                    
+                    // Update NMCK value if available
+                    if (eventData.nmc_value) {
+                        // You could store this for display in results view
+                        console.log(`NMCK value calculated: ${eventData.nmc_value}`);
+                    }
+                }
+
+                if(activeSidebarSearchId === id) {
+                    resetSidebarUI();
+                }
+
+                showToast(`Поиск завершен. Найдено ${item.found} контрактов`, 'success');
+                document.getElementById('badge-new').classList.remove('hidden');
+                renderHistory();
+                
+                // Close SSE connection
+                if(sseConnections[id]) {
+                    sseConnections[id].close();
+                    delete sseConnections[id];
+                }
+            }
         }
 
         function resetSidebarUI() {
@@ -575,8 +780,8 @@
             renderHistory();
         }
 
-        function refreshHistory() {
-            renderHistory();
+        async function refreshHistory() {
+            await loadHistory();
             showToast('История обновлена', 'info');
         }
 
@@ -650,8 +855,68 @@
         }
 
         // --- RESULTS LOGIC ---
-        function loadResults(historyItem) {
-            const count = historyItem.found;
+        async function loadResults(historyItem) {
+            try {
+                // Fetch results from backend
+                const response = await fetch(`/api/search/${historyItem.id}/results`);
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                const data = await response.json();
+                
+                // Convert API response to currentContracts format
+                currentContracts = data.results.map(result => {
+                    const signDate = new Date(result.sign_date);
+                    const year = signDate.getFullYear();
+                    const score = result.ai_score || Math.floor(60 + Math.random()*40);
+                    
+                    return {
+                        id: result.id,
+                        date: result.sign_date.split('T')[0],
+                        price: result.unit_price || 0,
+                        type: result.match_type === 'EXACT' ? "Идентичный" : "Однородный",
+                        manufacturer: result.manufacturer_found || "Не указан",
+                        score: score,
+                        is2025: year >= 2025,
+                        targetMfr: historyItem.targetMfr,
+                        specs: [], // Will be populated from raw_data_json if available
+                        rawData: result.raw_data_json,
+                        contract_url: result.contract_url,
+                        reestr_number: result.reestr_number,
+                        currency: result.currency,
+                        manufacturer_match: result.manufacturer_match,
+                        accepted_for_nmc: result.accepted_for_nmc
+                    };
+                });
+                
+                selectedContractIds.clear();
+                // Auto-select top 3 results by score
+                currentContracts.sort((a,b) => b.score - a.score);
+                currentContracts.slice(0, 3).forEach(c => selectedContractIds.add(c.id));
+
+                document.getElementById('res-title').innerText = historyItem.name;
+                document.getElementById('res-meta').innerText = `Найдено: ${data.total} | ${historyItem.ktru}`;
+                
+                document.getElementById('filter-id').value = '';
+                document.getElementById('filter-score').value = '';
+                
+                filteredContracts = [...currentContracts];
+                currentPage = 1;
+                applyAllFilters();
+                switchTab('results');
+                if(window.innerWidth < 1024) document.getElementById('sidebar').classList.add('translate-x-full');
+                
+            } catch (error) {
+                console.error('Error loading results:', error);
+                showToast('Не удалось загрузить результаты поиска', 'error');
+                // Fallback to mock data
+                loadMockResults(historyItem);
+            }
+        }
+
+        // Fallback function for mock results
+        function loadMockResults(historyItem) {
+            const count = historyItem.found || 10;
             const scenario = MOCK_SCENARIOS[historyItem.type] || MOCK_SCENARIOS.generic;
             currentContracts = [];
             selectedContractIds.clear();
@@ -743,15 +1008,23 @@
                      mfrHtml += ` <i class="fas fa-exclamation-triangle text-red-500 ml-1"></i>`;
                 }
 
+                // Create contract ID cell with link if available
+                let contractIdCell = `${c.id}`;
+                if (c.contract_url) {
+                    contractIdCell = `<a href="${c.contract_url}" target="_blank" class="text-blue-600 hover:underline font-mono text-xs">${c.reestr_number || c.id}</a>`;
+                } else if (c.reestr_number) {
+                    contractIdCell = `<span class="font-mono text-xs">${c.reestr_number}</span>`;
+                }
+                
                 tr.innerHTML = `
-                    <td class="p-3 text-center"><input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleSelect(${c.id})"></td>
-                    <td class="p-3 text-blue-600 font-mono text-xs cursor-pointer hover:underline">${c.id}</td>
+                    <td class="p-3 text-center"><input type="checkbox" ${isSel ? 'checked' : ''} onchange="toggleSelect('${c.id}')"></td>
+                    <td class="p-3 text-blue-600 font-mono text-xs">${contractIdCell}</td>
                     <td class="p-3 text-sm">${c.date.substring(0,4)}</td>
-                    <td class="p-3 font-bold text-sm">${c.price.toLocaleString('ru-RU')} ₽</td>
+                    <td class="p-3 font-bold text-sm">${c.price.toLocaleString('ru-RU')} ${c.currency || '₽'}</td>
                     <td class="p-3 text-xs font-bold uppercase text-gray-500">${c.type}</td>
                     <td class="p-3 text-xs">${mfrHtml}</td>
                     <td class="p-3 text-xs font-bold">${c.score}%</td>
-                    <td class="p-3 text-center"><button onclick="openComparison(${c.id})" class="text-gray-400 hover:text-blue-600 p-2"><i class="fas fa-eye"></i></button></td>
+                    <td class="p-3 text-center"><button onclick="openComparison('${c.id}')" class="text-gray-400 hover:text-blue-600 p-2"><i class="fas fa-eye"></i></button></td>
                 `;
                 tbody.appendChild(tr);
             });
@@ -773,8 +1046,110 @@
         }
         
         function changePage(d) { currentPage += d; renderResultsTable(); }
-        function openComparison(id) { document.getElementById('comparison-modal').classList.add('open'); }
-        function closeModal() { document.getElementById('comparison-modal').classList.remove('open'); }
+        function openComparison(id) { 
+            // Find the contract in currentContracts
+            const contract = currentContracts.find(c => c.id === id);
+            if (!contract) {
+                showToast('Контракт не найден', 'error');
+                return;
+            }
+            
+            // Update modal title
+            document.getElementById('comp-contract-id').textContent = `Контракт № ${contract.reestr_number || contract.id}`;
+            
+            // Populate comparison table
+            const tbody = document.getElementById('comp-table-body');
+            tbody.innerHTML = '';
+            
+            // Check if we have raw data with specifications
+            if (contract.rawData && contract.rawData.specifications) {
+                // Use specifications from raw data
+                contract.rawData.specifications.forEach(spec => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">${spec.name}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.target || 'Не указано'}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.actual || 'Не указано'}</td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full ${spec.match ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                ${spec.match ? '✓ Совпадает' : '✗ Не совпадает'}
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else if (contract.specs && contract.specs.length > 0) {
+                // Use specs from mock data
+                contract.specs.forEach(spec => {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">${spec.name}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.target}</td>
+                        <td class="px-4 py-3 text-gray-600">${spec.actual}</td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full ${spec.match ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                ${spec.match ? '✓ Совпадает' : '✗ Не совпадает'}
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            } else {
+                // No specifications available
+                const tr = document.createElement('tr');
+                tr.innerHTML = `
+                    <td colspan="4" class="px-4 py-8 text-center text-gray-500">
+                        <i class="fas fa-info-circle mr-2"></i>
+                        Характеристики для сравнения не найдены
+                    </td>
+                `;
+                tbody.appendChild(tr);
+            }
+            
+            // Show additional contract info if available
+            if (contract.rawData) {
+                // Add a row for contract URL if available
+                if (contract.contract_url) {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">Ссылка на контракт</td>
+                        <td colspan="3" class="px-4 py-3">
+                            <a href="${contract.contract_url}" target="_blank" class="text-blue-600 hover:underline">
+                                ${contract.contract_url}
+                            </a>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+                
+                // Add manufacturer info
+                if (contract.manufacturer_found) {
+                    const tr = document.createElement('tr');
+                    tr.className = 'hover:bg-gray-50';
+                    const matchStatus = contract.manufacturer_match ? '✓ Совпадает' : '✗ Не совпадает';
+                    tr.innerHTML = `
+                        <td class="px-4 py-3 font-medium">Производитель</td>
+                        <td class="px-4 py-3 text-gray-600">${contract.targetMfr || 'Не указан'}</td>
+                        <td class="px-4 py-3 text-gray-600">${contract.manufacturer_found}</td>
+                        <td class="px-4 py-3 text-center">
+                            <span class="px-2 py-1 text-xs rounded-full ${contract.manufacturer_match ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}">
+                                ${matchStatus}
+                            </span>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                }
+            }
+            
+            document.getElementById('comparison-modal').classList.add('open'); 
+        }
+        
+        function closeModal() { 
+            document.getElementById('comparison-modal').classList.remove('open'); 
+        }
         function showToast(msg, type) { 
             const el = document.createElement('div'); el.className = `toast border-${type==='success'?'green':type==='error'?'red':'blue'}-500`; 
             el.innerHTML = `<span>${msg}</span>`; document.getElementById('notification-area').appendChild(el);

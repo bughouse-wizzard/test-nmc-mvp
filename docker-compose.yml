@@ -1,0 +1,135 @@
+version: '3.8'
+
+services:
+  # Backend API Service
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nmck-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/nmck_db
+      - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - SECRET_KEY=${SECRET_KEY:-your-secret-key-here-change-in-production}
+    volumes:
+      - ./backend:/app
+      - ./frontend:/app/frontend
+    depends_on:
+      - db
+      - redis
+    networks:
+      - nmck-network
+    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+
+  # PostgreSQL Database
+  db:
+    image: postgres:15-alpine
+    container_name: nmck-db
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=nmck_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/db/init.sql:/docker-entrypoint-initdb.d/init.sql
+    networks:
+      - nmck-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and task queue
+  redis:
+    image: redis:7-alpine
+    container_name: nmck-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - nmck-network
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Nginx for serving static frontend and reverse proxy
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: nmck-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf
+      - ./frontend:/usr/share/nginx/html
+      - ./nginx/ssl:/etc/nginx/ssl
+    depends_on:
+      - backend
+    networks:
+      - nmck-network
+
+  # Celery Worker for background tasks
+  worker:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nmck-worker
+    restart: unless-stopped
+    environment:
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/nmck_db
+      - REDIS_URL=redis://redis:6379/0
+      - DEEPSEEK_API_KEY=${DEEPSEEK_API_KEY:-}
+      - WORKER_CONCURRENCY=${WORKER_CONCURRENCY:-2}
+    volumes:
+      - ./backend:/app
+      - ./data:/app/data
+    depends_on:
+      - db
+      - redis
+    networks:
+      - nmck-network
+    command: celery -A app.worker.celery_app worker --loglevel=info --concurrency=${WORKER_CONCURRENCY:-2}
+
+  # Celery Beat for scheduled tasks
+  beat:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: nmck-beat
+    restart: unless-stopped
+    environment:
+      - DEBUG=${DEBUG:-false}
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/nmck_db
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./backend:/app
+    depends_on:
+      - db
+      - redis
+    networks:
+      - nmck-network
+    command: celery -A app.worker.celery_app beat --loglevel=info
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  nmck-network:
+    driver: bridge
