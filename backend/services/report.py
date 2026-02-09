@@ -11,7 +11,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, PatternFill, Border, Side
 from openpyxl.utils import get_column_letter
 
-from ..models import SearchRequest, ContractResult, SpecComparisonRow, SearchStatus, MatchType
+from models import SearchRequest, ContractResult, SpecComparisonRow, SearchStatus, MatchType
 
 
 class ReportGenerator:

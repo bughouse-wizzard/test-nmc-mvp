@@ -32,7 +32,7 @@ def test_create_search():
         "input_source": "MANUAL"
     }
     
-    response = client.post("/api/search", json=search_data)
+    response = client.post("/api/search/", json=search_data)
     
     assert response.status_code == 200
     data = response.json()
@@ -69,7 +69,7 @@ def test_get_search():
         "input_source": "MANUAL"
     }
     
-    create_response = client.post("/api/search", json=search_data)
+    create_response = client.post("/api/search/", json=search_data)
     assert create_response.status_code == 200
     search_id = create_response.json()["id"]
     
@@ -147,7 +147,7 @@ def test_stop_search():
         "input_source": "MANUAL"
     }
     
-    create_response = client.post("/api/search", json=search_data)
+    create_response = client.post("/api/search/", json=search_data)
     assert create_response.status_code == 200
     search_id = create_response.json()["id"]
     
@@ -187,7 +187,7 @@ def test_get_search_results():
         "input_source": "MANUAL"
     }
     
-    create_response = client.post("/api/search", json=search_data)
+    create_response = client.post("/api/search/", json=search_data)
     assert create_response.status_code == 200
     search_id = create_response.json()["id"]
     
@@ -223,7 +223,7 @@ def test_get_search_results_with_pagination():
         "input_source": "MANUAL"
     }
     
-    create_response = client.post("/api/search", json=search_data)
+    create_response = client.post("/api/search/", json=search_data)
     assert create_response.status_code == 200
     search_id = create_response.json()["id"]
     
@@ -251,7 +251,7 @@ def test_invalid_search_request():
         "input_source": "MANUAL"
     }
     
-    response = client.post("/api/search", json=invalid_data)
+    response = client.post("/api/search/", json=invalid_data)
     assert response.status_code == 422  # Validation error
     
     # Test with invalid date range (date_to before date_from)
@@ -267,5 +267,5 @@ def test_invalid_search_request():
         "input_source": "MANUAL"
     }
     
-    response = client.post("/api/search", json=invalid_dates)
+    response = client.post("/api/search/", json=invalid_dates)
     assert response.status_code == 422  # Validation error

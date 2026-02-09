@@ -6,7 +6,7 @@ import unittest
 from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
-from .search import SearchParser
+from services.parser.search import SearchParser
 
 
 class TestSearchParser(unittest.TestCase):
@@ -75,7 +75,7 @@ class TestSearchParser(unittest.TestCase):
         self.assertTrue(url.startswith(self.parser.search_url))
         self.assertIn("?searchString=03121110-1", url)
         self.assertIn("selectedFz=fz44", url)
-        self.assertIn("selectedRegions=СЗФО", url)
+        self.assertIn("selectedRegions=%D0%A1%D0%97%D0%A4%D0%9E", url)  # URL-encoded СЗФО
     
     def test_parse_contract_card(self):
         """Test parsing individual contract card."""
@@ -86,6 +86,8 @@ class TestSearchParser(unittest.TestCase):
         mock_registry_element = MagicMock()
         mock_registry_element.get_text.return_value = "1234567890123456789"
         mock_registry_element.get.return_value = "/epz/contract/contractCard/document-info.html?reestrNumber=1234567890123456789"
+        # Mock dictionary-like access for href attribute
+        mock_registry_element.__getitem__.return_value = "/epz/contract/contractCard/document-info.html?reestrNumber=1234567890123456789"
         
         # Mock date element
         mock_date_element = MagicMock()
@@ -105,7 +107,7 @@ class TestSearchParser(unittest.TestCase):
         
         # Set up select_one to return appropriate elements
         def select_one_side_effect(selector):
-            if selector == "a.registry-entry__header-mid__number":
+            if selector == "a.registry-entry__header-mid__number" or selector == "a.registry-entry__header-mid__number[href]":
                 return mock_registry_element
             elif selector == "div.data-block__value":
                 return mock_date_element
@@ -202,9 +204,11 @@ class TestSearchParser(unittest.TestCase):
         self.assertEqual(limited_contracts[0]["registry_no"], "3")  # Newest
         self.assertEqual(limited_contracts[1]["registry_no"], "1")  # Second newest
     
-    @patch('backend.services.parser.search.aiohttp.ClientSession')
-    async def test_search_contracts_mock(self, mock_session_class):
+    @patch('services.parser.search.aiohttp.ClientSession')
+    def test_search_contracts_mock(self, mock_session_class):
         """Test search_contracts with mocked HTTP requests."""
+        import asyncio
+        
         # Create mock response
         mock_response = AsyncMock()
         mock_response.status = 200
@@ -229,8 +233,8 @@ class TestSearchParser(unittest.TestCase):
         
         mock_session_class.return_value = mock_session
         
-        # Call search_contracts
-        total_found, contracts = await self.parser.search_contracts(
+        # Call search_contracts using asyncio.run
+        total_found, contracts = asyncio.run(self.parser.search_contracts(
             ktru_code="03121110-1",
             customer_region="СЗФО",
             law="44-ФЗ",
@@ -238,7 +242,7 @@ class TestSearchParser(unittest.TestCase):
             date_to=datetime(2024, 12, 31),
             execution_statuses=["Исполнение завершено"],
             limit_contracts=10,
-        )
+        ))
         
         # Verify results
         self.assertEqual(total_found, 5)

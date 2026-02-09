@@ -8,7 +8,7 @@ from datetime import datetime
 # Add the backend directory to the path
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../../../..'))
 
-from backend.services.parser.search import SearchParser
+from services.parser.search import SearchParser
 
 
 def test_build_search_params():
@@ -53,7 +53,7 @@ def test_build_search_url():
     assert url.startswith(parser.search_url)
     assert "?searchString=03121110-1" in url
     assert "selectedFz=fz44" in url
-    assert "selectedRegions=СЗФО" in url
+    assert "selectedRegions=%D0%A1%D0%97%D0%A4%D0%9E" in url  # URL-encoded СЗФО
     
     print("✓ test_build_search_url passed")
 

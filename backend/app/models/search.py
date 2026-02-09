@@ -37,6 +37,12 @@ class SearchRequest(Base):
         input_source: Source of input data
         ktru_code: KTRU code (unified commodity position)
         object_name: Name of the procurement object
+        okpd2_code: OKPD2 code (optional)
+        customer_region: Customer region
+        law: Law type (44-ФЗ, 223-ФЗ, etc.)
+        date_from: Start date for contract search
+        date_to: End date for contract search
+        execution_statuses: List of execution statuses to filter
         limit_contracts: Maximum number of contracts to process (default 30)
         nmc_value: Calculated NMCK value
         selected_contract_ids: List of contract IDs selected for NMCK calculation
@@ -68,6 +74,37 @@ class SearchRequest(Base):
     
     object_name: Mapped[str] = mapped_column(
         String(500),
+        nullable=False
+    )
+    
+    okpd2_code: Mapped[Optional[str]] = mapped_column(
+        String(100),
+        nullable=True
+    )
+    
+    customer_region: Mapped[str] = mapped_column(
+        String(200),
+        nullable=False
+    )
+    
+    law: Mapped[str] = mapped_column(
+        String(50),
+        nullable=False
+    )
+    
+    date_from: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False
+    )
+    
+    date_to: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False
+    )
+    
+    execution_statuses: Mapped[List[str]] = mapped_column(
+        JSON,
+        default=list,
         nullable=False
     )
     

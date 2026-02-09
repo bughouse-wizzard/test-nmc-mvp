@@ -22,11 +22,11 @@ from ..core.events import (
     ProgressEvent, ResultAddedEvent, DoneEvent, ErrorEvent,
     EventType
 )
-from ...models import (
+from models import (
     SearchRequest, SearchStatus, ContractResult, MatchType,
     SpecComparisonRow, MatchStatus as ModelMatchStatus
 )
-from ...services.parser.search import SearchParser
+from services.parser.search import SearchParser
 
 logger = logging.getLogger(__name__)
 

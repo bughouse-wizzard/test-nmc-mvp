@@ -15,9 +15,9 @@ from sqlalchemy import desc
 from ...core.event_channel import event_channel
 from ...core.events import event_to_sse_format
 from ...worker.tasks import process_search
-from ...db import get_db
+from ...database import get_db
 from ...models import SearchRequest, ContractResult, SearchStatus, InputSource, MatchType
-from ....services.report import ReportGenerator
+from services.report import ReportGenerator
 
 router = APIRouter()
 

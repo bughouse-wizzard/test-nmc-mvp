@@ -10,8 +10,8 @@ from datetime import datetime, timedelta
 from uuid import uuid4
 
 from backend.models import SearchRequest, SearchStatus, ContractResult
-from backend.app.db import get_db
-from app.tasks.search_tasks import run_search_workflow
+from backend.app.database import get_db
+from backend.app.tasks.search_tasks import run_search_workflow
 
 
 class TestSearchWorkflow:

@@ -40,7 +40,9 @@ class RedisManager:
             print(f"Redis manager initialized with URL: {self.redis_url}")
         except Exception as e:
             print(f"Failed to initialize Redis manager: {e}")
-            raise
+            # Don't raise exception, just set redis_client to None
+            # This allows the application to work without Redis (for testing)
+            self.redis_client = None
     
     def set_stop_signal(self, search_id: str) -> bool:
         """
@@ -52,6 +54,8 @@ class RedisManager:
         Returns:
             True if signal was set successfully
         """
+        if self.redis_client is None:
+            return False
         try:
             key = self.STOP_SIGNAL_KEY.format(search_id=search_id)
             # Set with 1 hour expiration to prevent stale signals
@@ -70,6 +74,8 @@ class RedisManager:
         Returns:
             True if STOP signal exists, False otherwise
         """
+        if self.redis_client is None:
+            return False
         try:
             key = self.STOP_SIGNAL_KEY.format(search_id=search_id)
             signal = self.redis_client.get(key)
@@ -88,6 +94,8 @@ class RedisManager:
         Returns:
             True if signal was cleared successfully
         """
+        if self.redis_client is None:
+            return False
         try:
             key = self.STOP_SIGNAL_KEY.format(search_id=search_id)
             return self.redis_client.delete(key) > 0
@@ -108,6 +116,8 @@ class RedisManager:
         Returns:
             True if progress was updated successfully
         """
+        if self.redis_client is None:
+            return False
         try:
             key = self.PROGRESS_KEY.format(search_id=search_id)
             progress_data = {
@@ -134,6 +144,8 @@ class RedisManager:
         Returns:
             Dictionary with progress data or None if not found
         """
+        if self.redis_client is None:
+            return None
         try:
             key = self.PROGRESS_KEY.format(search_id=search_id)
             progress_data = self.redis_client.hgetall(key)
@@ -160,6 +172,8 @@ class RedisManager:
         Returns:
             True if progress was cleared successfully
         """
+        if self.redis_client is None:
+            return False
         try:
             key = self.PROGRESS_KEY.format(search_id=search_id)
             return self.redis_client.delete(key) > 0

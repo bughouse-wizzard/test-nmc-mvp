@@ -13,9 +13,9 @@ import aiohttp
 import httpx
 
 from ..core.config import settings
-from ...services.parser.contract import ContractParser, ContractInfo, ContractLineItem
-from ...services.ai.client import DeepSeekClient
-from ...services.matcher.engine import MatcherEngine, MatchStatus
+from services.parser.contract import ContractParser, ContractInfo, ContractLineItem
+from services.ai.client import DeepSeekClient
+from services.matcher.engine import MatcherEngine, MatchStatus
 
 logger = logging.getLogger(__name__)
 
