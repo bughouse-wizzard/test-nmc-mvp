@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y \
     g++ \
     libpq-dev \
     curl \
+    poppler-utils \
+    libmagic1 \
+    libxml2-dev \
+    libxslt1-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy requirements file
