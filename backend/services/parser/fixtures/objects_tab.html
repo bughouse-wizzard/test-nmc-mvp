@@ -1,0 +1,100 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Objects of Purchase</title>
+</head>
+<body>
+    <div class="objects-section">
+        <h2>Объекты закупки</h2>
+        
+        <table class="specification-table" id="products-table">
+            <thead>
+                <tr>
+                    <th>№</th>
+                    <th>Наименование объекта закупки</th>
+                    <th>Код по ОКПД2 / КТРУ</th>
+                    <th>Единица измерения</th>
+                    <th>Количество</th>
+                    <th>Цена за единицу, ₽</th>
+                    <th>Сумма, ₽</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr class="product-row" data-product-id="1">
+                    <td>1</td>
+                    <td>Серверное оборудование Dell PowerEdge R750</td>
+                    <td>OKPD2: 26.20.11.110 / KTRU: 26.20.11.110-00000001</td>
+                    <td>шт.</td>
+                    <td>5</td>
+                    <td>150 000,00</td>
+                    <td>750 000,00</td>
+                </tr>
+                <tr class="characteristics-row" data-product-id="1">
+                    <td colspan="7">
+                        <div class="characteristics-block">
+                            <h4>Характеристики:</h4>
+                            <ul>
+                                <li>Процессор: 2 x Intel Xeon Silver 4314</li>
+                                <li>Память: 256 ГБ DDR4</li>
+                                <li>Жесткие диски: 4 x 1.92 ТБ SSD</li>
+                                <li>Сетевые интерфейсы: 2 x 10GbE</li>
+                                <li>Гарантия: 3 года</li>
+                            </ul>
+                        </div>
+                    </td>
+                </tr>
+                <tr class="product-row" data-product-id="2">
+                    <td>2</td>
+                    <td>Сетевое оборудование Cisco Catalyst 9300</td>
+                    <td>OKPD2: 26.20.13.000 / KTRU: 26.20.13.000-00000002</td>
+                    <td>шт.</td>
+                    <td>3</td>
+                    <td>200 000,00</td>
+                    <td>600 000,00</td>
+                </tr>
+                <tr class="characteristics-row" data-product-id="2">
+                    <td colspan="7">
+                        <div class="characteristics-block">
+                            <h4>Характеристики:</h4>
+                            <ul>
+                                <li>Порты: 48 x 1GbE + 4 x 10GbE SFP+</li>
+                                <li>Скорость коммутации: 176 Гбит/с</li>
+                                <li>Поддержка PoE+</li>
+                                <li>Лицензия: DNA Advantage</li>
+                                <li>Гарантия: 5 лет</li>
+                            </ul>
+                        </div>
+                    </td>
+                </tr>
+                <tr class="product-row" data-product-id="3">
+                    <td>3</td>
+                    <td>Программное обеспечение Microsoft Windows Server 2022</td>
+                    <td>OKPD2: 58.29.11.110</td>
+                    <td>лицензия</td>
+                    <td>10</td>
+                    <td>15 000,00</td>
+                    <td>150 000,00</td>
+                </tr>
+                <tr class="characteristics-row" data-product-id="3">
+                    <td colspan="7">
+                        <div class="characteristics-block">
+                            <h4>Характеристики:</h4>
+                            <ul>
+                                <li>Версия: Datacenter Edition</li>
+                                <li>Количество ядер: неограничено</li>
+                                <li>Поддержка Hyper-V</li>
+                                <li>Лицензия: на 2 процессора</li>
+                                <li>Срок действия: бессрочная</li>
+                            </ul>
+                        </div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <div class="summary">
+            <p><strong>Итого по контракту:</strong> 1 500 000,00 ₽</p>
+        </div>
+    </div>
+</body>
+</html>
