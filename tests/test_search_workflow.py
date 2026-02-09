@@ -11,7 +11,7 @@ from uuid import uuid4
 
 from backend.models import SearchRequest, SearchStatus, ContractResult
 from backend.app.database import get_db
-from backend.app.tasks.search_tasks import run_search_workflow
+from app.tasks.search_tasks import run_search_workflow
 
 
 class TestSearchWorkflow:
@@ -97,7 +97,7 @@ class TestSearchWorkflow:
             'match_type': 'HOMOGENEOUS'
         }
         
-        with patch('app.tasks.search_tasks.get_db', return_value=mock_db), \
+        with patch('backend.app.database.get_db', return_value=mock_db), \
              patch('app.tasks.search_tasks.SearchParser', return_value=mock_parser), \
              patch('app.tasks.search_tasks.DocumentExtractor', return_value=mock_extractor), \
              patch('app.tasks.search_tasks.AIMatcher', return_value=mock_matcher), \
@@ -112,7 +112,8 @@ class TestSearchWorkflow:
             mock_calculate_nmc.return_value = 1500.0
             
             # Run the workflow
-            await run_search_workflow._run_search_workflow_async(mock_search_request.id)
+            from app.tasks.search_tasks import _run_search_workflow_async
+            await _run_search_workflow_async(mock_search_request.id)
             
             # Verify the workflow was executed correctly
             
@@ -161,14 +162,15 @@ class TestSearchWorkflow:
         mock_parser = AsyncMock()
         mock_parser.search_contracts.return_value = mock_contracts
         
-        with patch('app.tasks.search_tasks.get_db', return_value=mock_db), \
+        with patch('backend.app.database.get_db', return_value=mock_db), \
              patch('app.tasks.search_tasks.SearchParser', return_value=mock_parser), \
              patch('app.tasks.search_tasks._update_search_status') as mock_update_status, \
              patch('app.tasks.search_tasks._update_search_found_total') as mock_update_found, \
              patch('app.tasks.search_tasks._update_search_progress') as mock_update_progress:
             
             # Run the workflow
-            await run_search_workflow._run_search_workflow_async(mock_search_request.id)
+            from app.tasks.search_tasks import _run_search_workflow_async
+            await _run_search_workflow_async(mock_search_request.id)
             
             # Verify workflow stopped early
             
@@ -197,13 +199,14 @@ class TestSearchWorkflow:
         mock_parser = AsyncMock()
         mock_parser.search_contracts.return_value = []
         
-        with patch('app.tasks.search_tasks.get_db', return_value=mock_db), \
+        with patch('backend.app.database.get_db', return_value=mock_db), \
              patch('app.tasks.search_tasks.SearchParser', return_value=mock_parser), \
              patch('app.tasks.search_tasks._update_search_status') as mock_update_status, \
              patch('app.tasks.search_tasks._update_search_found_total') as mock_update_found:
             
             # Run the workflow
-            await run_search_workflow._run_search_workflow_async(mock_search_request.id)
+            from app.tasks.search_tasks import _run_search_workflow_async
+            await _run_search_workflow_async(mock_search_request.id)
             
             # Verify workflow completed with no contracts
             
@@ -234,13 +237,14 @@ class TestSearchWorkflow:
         mock_parser = AsyncMock()
         mock_parser.search_contracts.side_effect = Exception("Search failed")
         
-        with patch('app.tasks.search_tasks.get_db', return_value=mock_db), \
+        with patch('backend.app.database.get_db', return_value=mock_db), \
              patch('app.tasks.search_tasks.SearchParser', return_value=mock_parser), \
              patch('app.tasks.search_tasks._update_search_status') as mock_update_status:
             
             # Run the workflow and expect exception
+            from app.tasks.search_tasks import _run_search_workflow_async
             with pytest.raises(Exception, match="Search failed"):
-                await run_search_workflow._run_search_workflow_async(mock_search_request.id)
+                await _run_search_workflow_async(mock_search_request.id)
             
             # Verify error status was set
             mock_update_status.assert_any_call(

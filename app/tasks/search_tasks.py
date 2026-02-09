@@ -353,7 +353,14 @@ async def _call_ai_scoring(search_id: str, contract_details: Dict[str, Any], ext
             contract_details=contract_details
         )
         
-        return result.get('score', 0), result.get('match_type', 'NO_MATCH')
+        # Log AI agent's verdict
+        ai_score = result.get('score', 0)
+        match_type = result.get('match_type', 'NO_MATCH')
+        logger.info(f"AI Agent Verdict - Contract: {contract_details.get('id', 'unknown')}, "
+                   f"Score: {ai_score}, Match Type: {match_type}, "
+                   f"Manufacturer: {contract_details.get('manufacturer_found', 'unknown')}")
+        
+        return ai_score, match_type
         
     except Exception as e:
         logger.error(f"AI scoring failed: {e}")
@@ -506,6 +513,11 @@ def _calculate_nmc_value(search_id: str) -> float:
             # Mark selected contracts as accepted for NMC
             for contract in top_contracts:
                 contract.accepted_for_nmc = True
+        
+        # Log NMC calculation result
+        logger.info(f"NMC Calculation Result - Search ID: {search_id}, "
+                   f"NMC Value: {nmc_value:.2f}, Contracts Used: {len(top_contracts)}, "
+                   f"Top Contract IDs: {[c.id for c in top_contracts]}")
         
         return nmc_value
 

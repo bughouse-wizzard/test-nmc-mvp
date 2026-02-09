@@ -211,6 +211,10 @@ class DeepSeekClient:
                 # Store debug data in response for later use
                 response.debug_data = debug_data
                 
+                # Log AI agent response at INFO level for visibility
+                logger.info(f"AI Agent Response - Request ID: {response.id}, "
+                           f"Model: {response.model}, Tokens: {response.usage.total_tokens if response.usage else 'N/A'}")
+                
                 return response
             except Exception as e:
                 last_exception = e
@@ -296,6 +300,10 @@ class DeepSeekClient:
                 
                 # Store debug data in response for later use
                 response.debug_data = debug_data
+                
+                # Log AI agent response at INFO level for visibility
+                logger.info(f"AI Agent Response - Request ID: {response.id}, "
+                           f"Model: {response.model}, Tokens: {response.usage.total_tokens if response.usage else 'N/A'}")
                 
                 return response
             except Exception as e:
