@@ -16,7 +16,7 @@ from ...core.event_channel import event_channel
 from ...core.events import event_to_sse_format
 from ...worker.tasks import process_search
 from ...db import get_db
-from ...models import SearchRequest, ContractResult, SearchStatus, InputSource, MatchType
+from ...models import SearchRequest, ContractResult, SpecComparisonRow, SearchStatus, InputSource, MatchType, MatchStatus
 from ....services.report import ReportGenerator
 
 router = APIRouter()
@@ -75,6 +75,16 @@ class SearchResponse(BaseModel):
     error_message: Optional[str] = None
 
 
+class SpecComparisonResponse(BaseModel):
+    """Specification comparison response model."""
+    id: UUID
+    name: str
+    target_value: Optional[str]
+    actual_value: Optional[str]
+    match_status: MatchStatus
+    weight: int
+
+
 class ContractResultResponse(BaseModel):
     """Contract result response model."""
     id: UUID
@@ -93,6 +103,7 @@ class ContractResultResponse(BaseModel):
     accepted_for_nmc: bool
     raw_data_json: Dict[str, Any]
     created_at: datetime
+    spec_comparisons: List[SpecComparisonResponse] = []
 
 
 class SearchResultsResponse(BaseModel):
@@ -310,6 +321,23 @@ async def get_search_results(
     # Convert to response models
     result_responses = []
     for result in results:
+        # Load spec comparisons for this contract result
+        spec_comparisons = db.query(SpecComparisonRow)\
+            .filter(SpecComparisonRow.contract_result_id == result.id)\
+            .all()
+        
+        # Convert spec comparisons to response models
+        spec_responses = []
+        for spec in spec_comparisons:
+            spec_responses.append(SpecComparisonResponse(
+                id=UUID(spec.id),
+                name=spec.name,
+                target_value=spec.target_value,
+                actual_value=spec.actual_value,
+                match_status=spec.match_status,
+                weight=spec.weight
+            ))
+        
         result_responses.append(ContractResultResponse(
             id=UUID(result.id),
             search_id=UUID(result.search_id),
@@ -326,7 +354,8 @@ async def get_search_results(
             is_2025_plus=result.is_2025_plus,
             accepted_for_nmc=result.accepted_for_nmc,
             raw_data_json=result.raw_data_json,
-            created_at=result.created_at
+            created_at=result.created_at,
+            spec_comparisons=spec_responses
         ))
     
     return SearchResultsResponse(
@@ -456,60 +485,10 @@ async def stream_search_events(search_id: UUID):
     )
 
 
-@router.get("/{search_id}/report")
-async def get_search_report(
-    search_id: UUID,
-    db: Session = Depends(get_db)
-):
-    """
-    Generate and download XLSX report for a search.
-    
-    The report contains three sheets:
-    1. Summary Sheet: Search parameters and NMCK calculation results
-    2. Detailed Sheet: List of all analyzed contracts with match status, price, and manufacturer
-    3. Comparison Sheet: Detailed specification comparison for selected contracts
-    """
-    # Check if search exists
-    search_request = db.query(SearchRequest).filter(SearchRequest.id == str(search_id)).first()
-    if not search_request:
-        raise HTTPException(status_code=404, detail="Search not found")
-    
-    # Check if search is completed
-    if search_request.status != SearchStatus.DONE:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Cannot generate report for search with status: {search_request.status}. "
-                   f"Search must be completed (DONE) to generate report."
-        )
-    
-    try:
-        # Generate report
-        report_generator = ReportGenerator(db)
-        report_bytes = report_generator.generate_search_report(str(search_id))
-        
-        # Create filename with search ID and timestamp
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"report_search_{search_id}_{timestamp}.xlsx"
-        
-        # Return as streaming response
-        return StreamingResponse(
-            report_bytes,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": f"attachment; filename={filename}",
-                "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-            }
-        )
-    
-    except ValueError as e:
-        raise HTTPException(status_code=404, detail=str(e))
-    except Exception as e:
-        raise HTTPException(
-            status_code=500, 
-            detail=f"Failed to generate report: {str(e)}"
-        )
 
 
+
+@router.get("", response_model=SearchHistoryResponse)
 @router.get("/history", response_model=SearchHistoryResponse)
 async def get_search_history(
     skip: int = Query(0, ge=0, description="Number of records to skip"),
