@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 
 from .api import router as api_router
 from .core.config import settings
@@ -53,10 +54,15 @@ app.include_router(api_router, prefix="/api")
 # Note: This path assumes the backend is running from the project root
 # In production, this would be handled by nginx
 try:
-    app.mount("/", StaticFiles(directory="../../frontend", html=True), name="frontend")
+    app.mount("/static", StaticFiles(directory="../../frontend"), name="static")
 except RuntimeError:
     # If the path doesn't exist, don't mount it
     pass
+
+@app.get("/")
+async def root():
+    """Root endpoint serving the frontend application."""
+    return FileResponse("../../app/templates/front13.html")
 
 @app.get("/health")
 async def health_check():
