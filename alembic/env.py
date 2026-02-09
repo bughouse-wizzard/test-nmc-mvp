@@ -21,8 +21,11 @@ if config.config_file_name is not None:
 
 # add your model's MetaData object here
 # for 'autogenerate' support
-from backend.models import Base
+from backend.app.db.base import Base
 target_metadata = Base.metadata
+
+# Import all models to ensure they are registered with Base.metadata
+from backend.app.models import SearchRequest, ContractResult, SpecComparisonRow
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:
