@@ -199,6 +199,42 @@ class ContractParser:
         else:
             return base_url.replace('common-info', 'attachments')
     
+    def parse_common_info(self, html: str) -> Dict[str, Any]:
+        """
+        Extract basic fields from common info HTML.
+        
+        Args:
+            html: HTML content of the common info page
+            
+        Returns:
+            Dictionary with extracted basic fields
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        
+        # Extract basic contract information
+        reestr_number = self._extract_field(soup, 'Реестровый номер')
+        sign_date_str = self._extract_field(soup, 'Дата заключения контракта')
+        customer = self._extract_field(soup, 'Заказчик')
+        supplier = self._extract_field(soup, 'Поставщик')
+        total_price_str = self._extract_field(soup, 'Цена контракта')
+        currency = self._extract_field(soup, 'Валюта', default='RUB')
+        execution_status = self._extract_field(soup, 'Статус исполнения')
+        
+        # Parse dates and prices
+        sign_date = self._parse_date(sign_date_str) if sign_date_str else None
+        total_price = self._parse_price(total_price_str) if total_price_str else None
+        
+        return {
+            'reestr_number': reestr_number,
+            'sign_date': sign_date,
+            'customer': customer,
+            'supplier': supplier,
+            'total_price': total_price,
+            'currency': currency,
+            'execution_status': execution_status,
+            'raw_html': html
+        }
+    
     def _parse_common_info(self, html: str, url: str, reestr_number: str) -> ContractInfo:
         """Parse common information from contract page."""
         soup = BeautifulSoup(html, 'html.parser')
@@ -229,6 +265,132 @@ class ContractParser:
             attachments=[],
             raw_html=html
         )
+    
+    def parse_objects_tab(self, html: str) -> List[Dict[str, Any]]:
+        """
+        Parse objects tab to extract product information.
+        
+        Args:
+            html: HTML content of the objects/payments tab
+            
+        Returns:
+            List of dictionaries with extracted product information including characteristics
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        products = []
+        
+        # Look for specification tables - try multiple possible table classes/ids
+        tables = soup.find_all('table', class_=re.compile(r'specification|line-items|payments|products|objects'))
+        if not tables:
+            # Try to find any table that might contain product information
+            tables = soup.find_all('table')
+        
+        for table in tables:
+            # Check if this looks like a products table by examining headers
+            headers = table.find_all('th')
+            header_texts = [h.get_text(strip=True).lower() for h in headers]
+            
+            # Check for product-related headers
+            product_keywords = ['наименование', 'name', 'объект', 'product', 'товар']
+            if any(keyword in ' '.join(header_texts) for keyword in product_keywords):
+                products.extend(self._parse_products_table(table))
+        
+        return products
+    
+    def _parse_products_table(self, table) -> List[Dict[str, Any]]:
+        """Parse a products table to extract product information with characteristics."""
+        products = []
+        rows = table.find_all('tr')
+        current_product = None
+        
+        for i, row in enumerate(rows):
+            cells = row.find_all(['td', 'th'])
+            
+            # Skip header rows
+            if all(cell.name == 'th' for cell in cells):
+                continue
+            
+            # Check if this is a product row (has enough cells and contains product data)
+            if len(cells) >= 5 and not self._is_characteristics_row(row):
+                # Parse product row
+                product_data = self._parse_product_row(cells)
+                if product_data:
+                    current_product = product_data
+                    products.append(current_product)
+            
+            # Check if this is a characteristics row (follows a product row)
+            elif self._is_characteristics_row(row):
+                if current_product:
+                    characteristics = self._extract_characteristics(row)
+                    current_product['characteristics'] = characteristics
+        
+        return products
+    
+    def _is_characteristics_row(self, row) -> bool:
+        """Check if a row contains characteristics data."""
+        row_text = row.get_text(strip=True).lower()
+        characteristics_keywords = ['характеристик', 'characteristic', 'описание', 'description', 'техническ']
+        return any(keyword in row_text for keyword in characteristics_keywords)
+    
+    def _parse_product_row(self, cells: List) -> Optional[Dict[str, Any]]:
+        """Parse a product row into a dictionary."""
+        try:
+            # Extract data from cells based on expected positions
+            item_number = cells[0].get_text(strip=True) if len(cells) > 0 else ''
+            name = cells[1].get_text(strip=True) if len(cells) > 1 else ''
+            
+            # Extract OKPD2/KTRU codes
+            okpd2_code = None
+            ktru_code = None
+            if len(cells) > 2:
+                code_text = cells[2].get_text(strip=True)
+                if code_text:
+                    # Look for OKPD2 and KTRU codes
+                    okpd2_match = re.search(r'OKPD2[:\s]*([\d\.]+)', code_text, re.IGNORECASE)
+                    ktru_match = re.search(r'KTRU[:\s]*([\d\.\-]+)', code_text, re.IGNORECASE)
+                    okpd2_code = okpd2_match.group(1) if okpd2_match else None
+                    ktru_code = ktru_match.group(1) if ktru_match else None
+            
+            unit = cells[3].get_text(strip=True) if len(cells) > 3 else ''
+            quantity_str = cells[4].get_text(strip=True) if len(cells) > 4 else ''
+            unit_price_str = cells[5].get_text(strip=True) if len(cells) > 5 else ''
+            total_price_str = cells[6].get_text(strip=True) if len(cells) > 6 else ''
+            
+            # Parse numeric values
+            quantity = self._parse_float(quantity_str)
+            unit_price = self._parse_price(unit_price_str)
+            total_price = self._parse_price(total_price_str)
+            
+            return {
+                'item_number': item_number,
+                'name': name,
+                'okpd2_code': okpd2_code,
+                'ktru_code': ktru_code,
+                'unit': unit,
+                'quantity': quantity,
+                'unit_price': unit_price,
+                'total_price': total_price,
+                'characteristics': None  # Will be filled by characteristics row
+            }
+        except Exception as e:
+            logger.debug(f"Failed to parse product row: {e}")
+            return None
+    
+    def _extract_characteristics(self, row) -> str:
+        """Extract characteristics text from a row."""
+        try:
+            # Get all text from the row, excluding table structure
+            text_parts = []
+            for element in row.find_all(['td', 'div', 'span', 'p', 'ul', 'li']):
+                text = element.get_text(strip=True)
+                if text and len(text) > 3:  # Filter out very short text
+                    text_parts.append(text)
+            
+            # Join with newlines for readability
+            return '\n'.join(text_parts)
+        except Exception as e:
+            logger.debug(f"Failed to extract characteristics: {e}")
+            return ""
     
     def _parse_payments_tab(self, html: str) -> List[ContractLineItem]:
         """Parse line items from payments/specifications tab."""
@@ -295,6 +457,119 @@ class ContractParser:
             logger.debug(f"Failed to parse line item row: {e}")
             return None
     
+    def parse_attachments_list(self, html: str, base_url: str = "") -> List[Dict[str, Any]]:
+        """
+        Parse attachments list from HTML and filter for important documents.
+        
+        Args:
+            html: HTML content of the attachments tab
+            base_url: Base URL for resolving relative links
+            
+        Returns:
+            List of dictionaries with attachment information, filtered for important documents
+        """
+        soup = BeautifulSoup(html, 'html.parser')
+        attachments = []
+        
+        # Look for all links that might be attachments
+        all_links = soup.find_all('a', href=True)
+        
+        for link in all_links:
+            try:
+                href = link.get('href', '')
+                name = link.get_text(strip=True) or os.path.basename(href)
+                
+                # Skip empty links or non-document links
+                if not href or not self._is_document_link(href):
+                    continue
+                
+                # Make absolute URL if relative
+                if base_url and href.startswith('/'):
+                    # Extract base domain from base_url
+                    domain_match = re.match(r'(https?://[^/]+)', base_url)
+                    if domain_match:
+                        href = domain_match.group(1) + href
+                elif base_url and not href.startswith(('http://', 'https://')):
+                    # Handle relative paths
+                    href = urljoin(base_url, href)
+                
+                # Determine file type
+                file_ext = os.path.splitext(href)[1].lower().lstrip('.')
+                
+                # Check if this is an important document based on keywords
+                name_lower = name.lower()
+                is_important = False
+                document_type = 'other'
+                
+                # Check for specific document types
+                if any(keyword in name_lower for keyword in ['печатн', 'printed', 'print form']):
+                    is_important = True
+                    document_type = 'printed_form'
+                elif any(keyword in name_lower for keyword in ['техническ', 'technical', 'тз', 'specification']):
+                    is_important = True
+                    document_type = 'technical_specification'
+                elif any(keyword in name_lower for keyword in ['спецификац', 'specification']):
+                    is_important = True
+                    document_type = 'specification'
+                elif any(keyword in name_lower for keyword in ['контракт', 'contract', 'договор']):
+                    is_important = True
+                    document_type = 'contract'
+                
+                # Get file size if available (look in sibling elements)
+                file_size = self._extract_file_size(link)
+                
+                attachment = {
+                    'name': name,
+                    'url': href,
+                    'file_type': file_ext,
+                    'file_size': file_size,
+                    'document_type': document_type,
+                    'is_important': is_important,
+                    'download_url': href
+                }
+                attachments.append(attachment)
+                
+            except Exception as e:
+                logger.debug(f"Failed to parse attachment link: {e}")
+        
+        # Sort by importance (important documents first)
+        attachments.sort(key=lambda x: (not x['is_important'], x['name']))
+        
+        return attachments
+    
+    def _is_document_link(self, href: str) -> bool:
+        """Check if a link points to a document file."""
+        document_extensions = ['.pdf', '.doc', '.docx', '.xls', '.xlsx', '.rtf', '.txt', '.odt', '.ods']
+        href_lower = href.lower()
+        return any(href_lower.endswith(ext) for ext in document_extensions) or 'download' in href_lower
+    
+    def _extract_file_size(self, link_element) -> Optional[str]:
+        """Extract file size from link element or nearby elements."""
+        try:
+            # Look in the parent row for file size information
+            parent_row = link_element.find_parent('tr')
+            if parent_row:
+                # Look for cells that might contain size information
+                cells = parent_row.find_all(['td', 'div', 'span'])
+                for cell in cells:
+                    cell_text = cell.get_text(strip=True)
+                    # Look for size patterns like "2.5 МБ", "1.8 MB", "1024 KB"
+                    size_match = re.search(r'(\d+[\.,]?\d*)\s*(МБ|MB|КБ|KB|ГБ|GB|байт|bytes?)', cell_text, re.IGNORECASE)
+                    if size_match:
+                        return f"{size_match.group(1)} {size_match.group(2)}"
+            
+            # Check sibling elements
+            for sibling in link_element.find_next_siblings():
+                sibling_text = sibling.get_text(strip=True)
+                size_match = re.search(r'(\d+[\.,]?\d*)\s*(МБ|MB|КБ|KB|ГБ|GB)', sibling_text, re.IGNORECASE)
+                if size_match:
+                    return f"{size_match.group(1)} {size_match.group(2)}"
+                    
+        except Exception as e:
+            logger.debug(f"Failed to extract file size: {e}")
+        
+        return None
+    
     def _parse_attachments_tab(self, html: str, base_url: str) -> List[ContractAttachment]:
         """Parse attachments from attachments tab."""
         soup = BeautifulSoup(html, 'html.parser')
@@ -331,6 +606,58 @@ class ContractParser:
                 logger.debug(f"Failed to parse attachment link: {e}")
         
         return attachments
+    
+    def is_contract_2025_or_later(self, contract_date: Optional[datetime]) -> bool:
+        """
+        Check if contract is from 2025 or later.
+        
+        Args:
+            contract_date: Contract sign date
+            
+        Returns:
+            True if contract is from 2025 or later, False otherwise
+        """
+        if not contract_date:
+            return False
+        
+        return contract_date.year >= self.year_threshold
+    
+    def prioritize_print_form_extraction(self, attachments: List[Dict[str, Any]], 
+                                         contract_date: Optional[datetime] = None) -> List[Dict[str, Any]]:
+        """
+        Prioritize print form extraction based on contract date.
+        
+        Args:
+            attachments: List of attachment dictionaries
+            contract_date: Contract sign date (optional)
+            
+        Returns:
+            Filtered and prioritized list of attachments
+        """
+        if not attachments:
+            return []
+        
+        # If contract date is provided and contract is 2025+, prioritize printed forms
+        if contract_date and self.is_contract_2025_or_later(contract_date):
+            # Find printed forms
+            printed_forms = [a for a in attachments if a.get('document_type') == 'printed_form']
+            
+            # If we found printed forms, return them first
+            if printed_forms:
+                # Sort printed forms by relevance
+                printed_forms.sort(key=lambda x: (
+                    'печатн' in x.get('name', '').lower(),
+                    'pdf' in x.get('file_type', '').lower()
+                ), reverse=True)
+                
+                # Add other important documents after printed forms
+                other_important = [a for a in attachments if a.get('is_important') and a.get('document_type') != 'printed_form']
+                other_docs = [a for a in attachments if not a.get('is_important')]
+                
+                return printed_forms + other_important + other_docs
+        
+        # For older contracts or no date, just sort by importance
+        return sorted(attachments, key=lambda x: (not x.get('is_important', False), x.get('name', '')))
     
     def _find_printed_form(self, attachments: List[ContractAttachment]) -> Optional[ContractAttachment]:
         """Find printed form among attachments."""
@@ -387,18 +714,53 @@ class ContractParser:
     
     def _extract_field(self, soup: BeautifulSoup, field_name: str, default: str = None) -> Optional[str]:
         """Extract field value by label name."""
-        # Look for label containing field name
-        label = soup.find(lambda tag: tag.name in ['span', 'div', 'td'] and 
+        # Try different strategies to find the field
+        
+        # Strategy 1: Look for label with class 'label' containing field name
+        label = soup.find('span', class_='label', string=lambda text: text and field_name.lower() in text.lower())
+        if not label:
+            # Also try without colon
+            label = soup.find('span', class_='label', string=lambda text: text and field_name.lower() in text.lower().rstrip(':'))
+        
+        if label:
+            # Find the value span next to it
+            parent = label.parent
+            if parent:
+                value_span = parent.find('span', class_='value')
+                if value_span:
+                    return value_span.get_text(strip=True)
+        
+        # Strategy 2: Look for any element containing field name
+        label = soup.find(lambda tag: tag.name in ['span', 'div', 'td', 'th'] and 
                          field_name.lower() in tag.get_text(strip=True).lower())
         
         if label:
             # Try to find associated value
             parent = label.parent
             if parent:
-                # Look for value in sibling or next element
+                # Look for value in sibling elements
                 for sibling in parent.find_all(['span', 'div', 'td']):
                     if sibling != label and sibling.get_text(strip=True):
-                        return sibling.get_text(strip=True)
+                        sibling_text = sibling.get_text(strip=True)
+                        # Check if this looks like a value (not another label)
+                        if len(sibling_text) > 0 and not any(
+                            kw in sibling_text.lower() for kw in 
+                            ['реестровый', 'дата', 'заказчик', 'поставщик', 'цена', 'валюта', 'статус']
+                        ):
+                            return sibling_text
+        
+        # Strategy 3: Search in info rows
+        info_rows = soup.find_all(['div', 'tr'], class_=lambda x: x and 'info' in x.lower() or 'row' in x.lower())
+        for row in info_rows:
+            row_text = row.get_text(strip=True)
+            if field_name.lower() in row_text.lower():
+                # Extract value after field name
+                parts = row_text.split(':', 1)
+                if len(parts) > 1:
+                    value = parts[1].strip()
+                    # Remove currency symbols and extra spaces
+                    value = value.replace('₽', '').replace('€', '').replace('$', '').strip()
+                    return value if value else None
         
         return default
     
